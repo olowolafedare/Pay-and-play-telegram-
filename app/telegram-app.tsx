@@ -26,7 +26,8 @@ type Transaction = { id: string; type: string; points: number; metadata: Record<
 export default function TelegramApp() {
   const [initData, setInitData] = useState("");
   const [player, setPlayer] = useState<Player | null>(null);
-  const [leaders, setLeaders] = useState<Leader[]>([]);\n  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [leaders, setLeaders] = useState<Leader[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [busy, setBusy] = useState(false);
   const [adSdkReady, setAdSdkReady] = useState(false);
   const [tapPending, setTapPending] = useState(0);
@@ -46,18 +47,24 @@ export default function TelegramApp() {
     return d;
   }, [initData]);
 
-  const loadTransactions = useCallback(async () => {\n    if (!initData) return;\n    try { const result = await api("/api/game/transactions"); setTransactions(result.transactions ?? []); } catch { /* keep the game usable if history is temporarily unavailable */ }\n  }, [api, initData]);\n\n  const refresh = useCallback(async () => {
+  const loadTransactions = useCallback(async () => {
+    if (!initData) return;
+    try { const result = await api("/api/game/transactions"); setTransactions(result.transactions ?? []); } catch { /* keep the game usable if history is temporarily unavailable */ }
+  }, [api, initData]);
+
+  const refresh = useCallback(async () => {
     if (!initData) return;
     try {
       const p = await api("/api/telegram/auth", "POST");
       setPlayer(p);
       const l = await api("/api/leaderboard");
       setLeaders(l.leaderboard);
+      await loadTransactions();
       setMessage("Tap the Gome coin to use Live Points and earn Gome Coins.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Unable to connect.");
     }
-  }, [api, initData]);
+  }, [api, initData, loadTransactions]);
 
   useEffect(() => {
     let attempts = 0;
@@ -115,7 +122,8 @@ export default function TelegramApp() {
             lifetimeEarned: previous.lifetimeEarned,
             tapLevel: d.tapPower ?? previous.tapLevel,
           } : previous);
-          setMessage("Used " + d.spent + " Live Points · earned " + d.gomeCoinsEarned + " Gome Coins.");\n          void loadTransactions();
+          setMessage("Used " + d.spent + " Live Points · earned " + d.gomeCoinsEarned + " Gome Coins.");
+          void loadTransactions();
         } catch (e) {
           tapQueue.current = 0;
           setTapPending(0);
@@ -127,7 +135,7 @@ export default function TelegramApp() {
       tapRunning.current = false;
       setTapPending(0);
     }
-  }, [api]);
+  }, [api, loadTransactions]);
 
   function tap() {
     if (!player) {
@@ -160,6 +168,7 @@ export default function TelegramApp() {
           await new Promise(resolve => setTimeout(resolve, 1800));
           const p = await api("/api/telegram/auth", "POST");
           setPlayer(p);
+          void loadTransactions();
           if (p.adPointsEarned > player.adPointsEarned) {
             setMessage("Reward credited: +" + adReward + " points.");
             break;
@@ -182,7 +191,8 @@ export default function TelegramApp() {
     try {
       const d = await api("/api/game/daily", "POST");
       setPlayer(previous => previous ? { ...previous, points: d.points, lifetimeEarned: previous.lifetimeEarned + d.awarded, dailyClaimed: true } : previous);
-      setMessage("Daily reward claimed: +" + d.awarded + " points.");\n      void loadTransactions();
+      setMessage("Daily reward claimed: +" + d.awarded + " points.");
+      void loadTransactions();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Claim failed.");
     } finally {
@@ -276,8 +286,8 @@ export default function TelegramApp() {
           const coinAmount = Number(item.metadata?.gomeCoinsEarned ?? (item.type === "referral_bonus" ? item.points : 0));
           return <div className="leader-row transaction-row" key={item.id}>
             <span className="rank">{item.type === "tap_spend" ? "−" : "+"}</span>
-            <span>{label}<small>{new Date(item.createdAt).toLocaleString()}</small></span>
-            <b>{item.type === "referral_bonus" ? coinAmount + " GOME" : item.type === "tap_spend" ? item.points + " PTS" : item.points + " PTS"}</b>
+            <span>{label}<small>{new Date(item.createdAt).toLocaleString()}{coinAmount > 0 && item.type === "tap_spend" ? " · +" + coinAmount + " GOME" : ""}</small></span>
+            <b>{item.type === "referral_bonus" ? coinAmount + " GOME" : item.type === "tap_spend" ? "−" + item.points + " PTS" : "+" + item.points + " PTS"}</b>
           </div>;
         }) : <p className="leader-empty">Your reward and conversion transactions will appear here.</p>}
       </section>
