@@ -5,7 +5,7 @@ import { getInitData,verifyTelegramInitData } from "@/lib/telegram";
 export const runtime="nodejs";
 export async function POST(req:Request){
  try{
-  const {user}=verifyTelegramInitData(getInitData(req)), points=Math.max(1,Number(process.env.GAME_DAILY_POINTS??25)), c=await db.connect();
+  const {user}=verifyTelegramInitData(getInitData(req)), points=Math.max(1,Number(process.env.GAME_DAILY_POINTS??100)), c=await db.connect();
   try{
    await c.query("BEGIN");const u=await c.query("SELECT id FROM app_users WHERE telegram_id=$1",[user.id]);if(!u.rowCount)throw new Error("Sign in first");
    const claim=await c.query("INSERT INTO daily_reward_claims(user_id,points_awarded) VALUES($1,$2) ON CONFLICT(user_id,claim_date) DO NOTHING RETURNING id",[u.rows[0].id,points]);
