@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
@@ -27,13 +27,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Invalid ad event." }, { status: 400 });
   }
 
-  // Monetag sends both impression and click callbacks for rewarded interstitials.
-  // Only process the impression so one ad show can never earn twice.
+  // Only valued impression events earn points. Clicks and non-valued events do not.
   if (eventType !== "impression" || rewardType !== "valued") {
     return NextResponse.json({ ok: true, awarded: 0 });
   }
 
-  // The app creates ymid as gome_<Telegram user ID>_<unique UUID>.
   const match = /^gome_(\d{1,20})_([a-f0-9]{32})$/.exec(ymid);
   if (!match) return NextResponse.json({ error: "Invalid ad reference." }, { status: 400 });
   const telegramId = match[1];
@@ -41,7 +39,6 @@ export async function GET(req: Request) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-
     const user = await client.query(
       "SELECT id FROM app_users WHERE telegram_id = $1 FOR UPDATE",
       [telegramId]
@@ -52,15 +49,8 @@ export async function GET(req: Request) {
     }
     const userId = user.rows[0].id;
 
-    const claim = await client.query(
-      "SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE",
-      [userId]
-    );
-    if (!claim.rowCount) {
-      await client.query("ROLLBACK");
-      return NextResponse.json({ ok: true, awarded: 0, reason: "daily_claim_required" });
-    }
-
+    // New and returning users may watch rewarded ads without first claiming
+    // the daily reward. The valued server postback is the only credit authority.
     const inserted = await client.query(
       "INSERT INTO rewarded_ad_events(provider_event_id, user_id, points_awarded) VALUES($1, $2, 50) ON CONFLICT(provider_event_id) DO NOTHING RETURNING provider_event_id",
       [ymid, userId]
@@ -76,7 +66,7 @@ export async function GET(req: Request) {
     );
     await client.query(
       "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'ad_reward', 50, $2, $3)",
-      [userId, randomUUID(), JSON.stringify({ provider: "monetag", ymid, zoneId, estimatedPrice: params.get("estimated_price") })]
+      [userId, `monetag:${ymid}`, JSON.stringify({ provider: "monetag", ymid, zoneId, estimatedPrice: params.get("estimated_price") })]
     );
 
     await client.query("COMMIT");
