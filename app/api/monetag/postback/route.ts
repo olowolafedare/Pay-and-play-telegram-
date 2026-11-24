@@ -40,7 +40,7 @@ export async function GET(req: Request) {
   try {
     await client.query("BEGIN");
     const user = await client.query(
-      "SELECT id FROM app_users WHERE telegram_id = $1 FOR UPDATE",
+      "SELECT a.id, COALESCE(w.ad_points_earned, 0) AS ad_points_earned FROM app_users a JOIN rewards_wallets w ON w.user_id = a.id WHERE a.telegram_id = $1 FOR UPDATE OF a, w",
       [telegramId]
     );
     if (!user.rowCount) {
@@ -48,12 +48,17 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Player not found." }, { status: 404 });
     }
     const userId = user.rows[0].id;
+    const adPoints = Number(user.rows[0].ad_points_earned);
+    const thresholds = [0, 12500, 30000, 55000, 90000, 135000, 195000, 270000, 365000, 500000];
+    let level = 1;
+    for (let i = 1; i < thresholds.length; i++) { if (adPoints >= thresholds[i]) level = i + 1; else break; }
+    const adReward = 50 * level;
 
     // New and returning users may watch rewarded ads without first claiming
     // the daily reward. The valued server postback is the only credit authority.
     const inserted = await client.query(
-      "INSERT INTO rewarded_ad_events(provider_event_id, user_id, points_awarded) VALUES($1, $2, 50) ON CONFLICT(provider_event_id) DO NOTHING RETURNING provider_event_id",
-      [ymid, userId]
+      "INSERT INTO rewarded_ad_events(provider_event_id, user_id, points_awarded) VALUES($1, $2, $3) ON CONFLICT(provider_event_id) DO NOTHING RETURNING provider_event_id",
+      [ymid, userId, adReward]
     );
     if (!inserted.rowCount) {
       await client.query("ROLLBACK");
@@ -61,16 +66,16 @@ export async function GET(req: Request) {
     }
 
     await client.query(
-      "UPDATE rewards_wallets SET points = points + 50, lifetime_earned = lifetime_earned + 50, ad_points_earned = ad_points_earned + 50, updated_at = NOW() WHERE user_id = $1",
-      [userId]
+      "UPDATE rewards_wallets SET points = points + $1, lifetime_earned = lifetime_earned + $1, ad_points_earned = ad_points_earned + $1, updated_at = NOW() WHERE user_id = $2",
+      [adReward, userId]
     );
     await client.query(
-      "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'ad_reward', 50, $2, $3)",
-      [userId, `monetag:${ymid}`, JSON.stringify({ provider: "monetag", ymid, zoneId, estimatedPrice: params.get("estimated_price") })]
+      "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'ad_reward', $2, $3, $4)",
+      [userId, adReward, `monetag:${ymid}`, JSON.stringify({ provider: "monetag", ymid, zoneId, level, estimatedPrice: params.get("estimated_price") })]
     );
 
     await client.query("COMMIT");
-    return NextResponse.json({ ok: true, awarded: 50 });
+    return NextResponse.json({ ok: true, awarded: adReward, level });
   } catch {
     await client.query("ROLLBACK");
     return NextResponse.json({ error: "Unable to process reward." }, { status: 500 });
