@@ -25,8 +25,9 @@ export default function TelegramApp() {
   const [player, setPlayer] = useState<Player | null>(null);
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [busy, setBusy] = useState(false);
+  const [adSdkReady, setAdSdkReady] = useState(false);
   const [tapPending, setTapPending] = useState(0);
-  const [message, setMessage] = useState("Open this Mini App inside Telegram to play.");
+  const [message, setMessage] = useState("Connecting to Telegram...");
   const tapQueue = useRef(0);
   const tapRunning = useRef(false);
 
@@ -55,12 +56,37 @@ export default function TelegramApp() {
   }, [api, initData]);
 
   useEffect(() => {
-    const w = window.Telegram?.WebApp;
-    if (w) {
-      w.ready();
-      w.expand();
-      setInitData(w.initData);
-    }
+    let attempts = 0;
+    const checkTelegram = () => {
+      const webApp = window.Telegram?.WebApp;
+      if (webApp?.initData) {
+        webApp.ready();
+        webApp.expand();
+        setInitData(webApp.initData);
+        setMessage("Connecting your Gome account...");
+        window.clearInterval(timer);
+      } else if (++attempts >= 40) {
+        setMessage("Telegram session not detected. Open Gome from the bot's Mini App button, then tap Reconnect.");
+        window.clearInterval(timer);
+      }
+    };
+    const timer = window.setInterval(checkTelegram, 250);
+    checkTelegram();
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      if (typeof window.show_12342383 === "function") {
+        setAdSdkReady(true);
+        window.clearInterval(timer);
+      } else if (++attempts >= 40) {
+        setAdSdkReady(false);
+        window.clearInterval(timer);
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -104,7 +130,7 @@ export default function TelegramApp() {
   async function watchAd() {
     if (!player || busy) return;
     const showAd = window.show_12342383;
-    if (!showAd) { setMessage("Ad service is still loading. Please try again."); return; }
+    if (!showAd) { setMessage("Monetag SDK did not load. Check that zone 12342383 is active and this Telegram Mini App URL is approved in Monetag."); return; }
     setBusy(true);
     try {
       const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
@@ -206,9 +232,14 @@ export default function TelegramApp() {
         </div>
 
         <p className="game-message" role="status">{message}</p>
+        {!player && <button className="connect-button" onClick={() => {
+          const data = window.Telegram?.WebApp?.initData;
+          if (data) setInitData(data);
+          else setMessage("Telegram has not supplied a signed session. Close this screen and reopen Gome from the bot's Mini App button.");
+        }}>↻ Reconnect Telegram</button>}
         <div className="game-actions">
-          <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +50 <small>REWARDED AD</small></button>
-          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 100 daily points"}</button>
+          <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +50 <small>{adSdkReady ? "REWARDED AD READY" : "CONNECTING TO MONETAG"}</small></button>
+          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 50 daily points"}</button>
           <button onClick={invite} disabled={!player}>↗ Invite & earn 10 Gome Coins</button>
         </div>
       </section>
