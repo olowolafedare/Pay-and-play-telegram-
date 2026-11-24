@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 declare global {
   interface Window {
     Telegram?: { WebApp?: { initData: string; ready: () => void; expand: () => void; openTelegramLink?: (url: string) => void } };
+    show_12342383?: (options?: { ymid?: string; requestVar?: string }) => Promise<{ reward_event_type?: "valued" | "non_valued"; variable2?: string } | undefined>;
   }
 }
 
@@ -76,6 +77,26 @@ export default function TelegramApp() {
     }
   }
 
+  async function watchAd() {
+    if (!player || !player.dailyClaimed || busy) return;
+    const showAd = window.show_12342383;
+    if (!showAd) { setMessage("Ad service is still loading. Please try again."); return; }
+    setBusy(true);
+    try {
+      const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
+      const result = await showAd({ ymid, requestVar: "daily_reward_ad" });
+      if (result?.reward_event_type === "valued") {
+        setMessage("Monetag confirmed a valued ad. Your 50-point reward is awaiting secure server credit.");
+      } else {
+        setMessage("Ad completed, but Monetag did not mark it as a paid event. No points awarded.");
+      }
+    } catch {
+      setMessage("The ad could not be verified. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function daily() {
     if (!player || busy) return;
     setBusy(true);
@@ -135,7 +156,7 @@ export default function TelegramApp() {
 
         <p className="game-message" role="status">{message}</p>
         <div className="game-actions">
-          <button className="ad-button" disabled title={!player?.dailyClaimed ? "Claim your 100 daily points first" : "Rewarded ad provider connection is not configured"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "COMING SOON"}</small></button>
+          <button className="ad-button" onClick={watchAd} disabled={!player?.dailyClaimed || busy} title={!player?.dailyClaimed ? "Claim your 100 daily points first" : "Watch a Monetag rewarded interstitial"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "REWARDED AD"}</small></button>
           <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 100 daily points"}</button>
           <button onClick={invite} disabled={!player}>↗ Share & invite</button>
         </div>
