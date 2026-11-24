@@ -69,7 +69,7 @@ export async function POST(req: Request) {
            VALUES ($1, $2, 'qualified', 10, NOW())
            ON CONFLICT (referred_user_id) DO NOTHING
            RETURNING id`,
-          [rawReferrerId, user.id]
+          [referrerDbId, account.id]
         );
         if (referral.rowCount) {
           await client.query(
