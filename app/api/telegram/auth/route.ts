@@ -44,6 +44,7 @@ export async function POST(req: Request) {
         await client.query(`INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES ($1, $2) ON CONFLICT (referred_user_id) DO NOTHING`, [referrerDbId, account.id]);
       }
       const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned FROM rewards_wallets WHERE user_id = $1", [account.id]);
+      const dailyClaim = await client.query("SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE", [account.id]);
       const adPoints = Number(wallet.rows[0].ad_points_earned);
       const level = progression(adPoints);
       await client.query("COMMIT");
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
         adPointsEarned: adPoints,
         tapLevel: level.level,
         upgradeProgress: level.progress,
+        dailyClaimed: dailyClaim.rowCount > 0,
         referralCode: "ref_" + account.telegram_id,
       });
     } catch (error) {
