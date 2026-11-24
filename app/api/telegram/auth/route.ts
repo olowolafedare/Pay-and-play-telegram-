@@ -35,13 +35,31 @@ export async function POST(req: Request) {
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name, language_code = EXCLUDED.language_code, last_seen_at = NOW()
-         RETURNING id, telegram_id, username, first_name`,
+         RETURNING id, telegram_id, username, first_name, (xmax = 0) AS is_new_user`,
         [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, referrerDbId]
       );
       const account = saved.rows[0];
       await client.query("INSERT INTO rewards_wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", [account.id]);
-      if (referrerDbId) {
-        await client.query(`INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES ($1, $2) ON CONFLICT (referred_user_id) DO NOTHING`, [referrerDbId, account.id]);
+      // Referral rewards are one-time: only a genuinely new Telegram account
+      // joining through a valid referral link can qualify the referrer.
+      if (referrerDbId && account.is_new_user) {
+        const referral = await client.query(
+          `INSERT INTO referrals (referrer_user_id, referred_user_id, status, bonus_awarded, qualified_at)
+           VALUES ($1, $2, 'qualified', 100, NOW())
+           ON CONFLICT (referred_user_id) DO NOTHING
+           RETURNING id`,
+          [referrerDbId, account.id]
+        );
+        if (referral.rowCount) {
+          await client.query(
+            "UPDATE rewards_wallets SET points = points + 100, lifetime_earned = lifetime_earned + 100, updated_at = NOW() WHERE user_id = $1",
+            [referrerDbId]
+          );
+          await client.query(
+            "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'referral_bonus', 100, $2, $3)",
+            [referrerDbId, `referral:${account.id}`, JSON.stringify({ referredUserId: String(account.telegram_id), gomeCoins: 10 })]
+          );
+        }
       }
       const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned FROM rewards_wallets WHERE user_id = $1", [account.id]);
       const dailyClaim = await client.query("SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE", [account.id]);
