@@ -65,25 +65,25 @@ export async function POST(req: Request) {
       // The referrals table stores Telegram IDs, while rewards_wallets stores app_users IDs.
       if (referrerDbId && account.is_new_user) {
         const referral = await client.query(
-          `INSERT INTO referrals (referrer_user_id, referred_user_id, reward_points, status, qualified_at, rewarded_at)
-           VALUES ($1, $2, 100, 'rewarded', NOW(), NOW())
+          `INSERT INTO referrals (referrer_user_id, referred_user_id, status, bonus_awarded, qualified_at)
+           VALUES ($1, $2, 'qualified', 10, NOW())
            ON CONFLICT (referred_user_id) DO NOTHING
            RETURNING id`,
           [rawReferrerId, user.id]
         );
         if (referral.rowCount) {
           await client.query(
-            "UPDATE rewards_wallets SET points = points + 100, lifetime_earned = lifetime_earned + 100, updated_at = NOW() WHERE user_id = $1",
+            "UPDATE rewards_wallets SET gome_coins = gome_coins + 10, updated_at = NOW() WHERE user_id = $1",
             [referrerDbId]
           );
           await client.query(
-            "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'referral_bonus', 100, $2, $3)",
+            "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'referral_bonus', 10, $2, $3)",
             [referrerDbId, `referral:${account.id}`, JSON.stringify({ referredUserId: String(account.telegram_id), gomeCoins: 10 })]
           );
         }
       }
 
-      const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned FROM rewards_wallets WHERE user_id = $1", [account.id]);
+      const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned, gome_coins, conversion_remainder FROM rewards_wallets WHERE user_id = $1", [account.id]);
       const dailyClaim = await client.query("SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE", [account.id]);
       const adPoints = Number(wallet.rows[0].ad_points_earned);
       const level = progression(adPoints);
@@ -91,6 +91,8 @@ export async function POST(req: Request) {
       return NextResponse.json({
         user: { id: String(account.telegram_id), name: account.first_name, username: account.username },
         points: Number(wallet.rows[0].points),
+        gomeCoins: Number(wallet.rows[0].gome_coins),
+        conversionRemainder: Number(wallet.rows[0].conversion_remainder),
         lifetimeEarned: Number(wallet.rows[0].lifetime_earned),
         adPointsEarned: adPoints,
         tapLevel: level.level,
