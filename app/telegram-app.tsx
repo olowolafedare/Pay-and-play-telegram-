@@ -264,9 +264,16 @@ export default function TelegramApp() {
 
         <p className="game-message" role="status">{message}</p>
         {!player && <button className="connect-button" onClick={() => {
-          const data = window.Telegram?.WebApp?.initData;
-          if (data) setInitData(data);
-          else setMessage("Telegram has not supplied a signed session. Close this screen and reopen Gome from the bot's Mini App button.");
+          const data = window.Telegram?.WebApp?.initData || initData;
+          if (!data) {
+            setMessage("Telegram has not supplied a signed session. Open this Mini App using the bot's Gome button inside Telegram.");
+            return;
+          }
+          if (data !== initData) setInitData(data);
+          else {
+            setMessage("Reconnecting your Telegram account...");
+            void refresh();
+          }
         }}>↻ Reconnect Telegram</button>}
         <div className="game-actions">
           <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +{adReward} <small>{adSdkReady ? "REWARDED AD READY" : "CONNECTING TO MONETAG"}</small></button>
