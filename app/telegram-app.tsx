@@ -14,6 +14,7 @@ type Player = {
   adPointsEarned: number;
   tapLevel: number;
   upgradeProgress: number;
+  dailyClaimed: boolean;
   referralCode: string;
 };
 type Leader = { rank: number; name: string; points: number };
@@ -80,8 +81,8 @@ export default function TelegramApp() {
     setBusy(true);
     try {
       const d = await api("/api/game/daily", "POST");
-      setPlayer({ ...player, points: d.points, lifetimeEarned: player.lifetimeEarned + d.awarded });
-      setMessage("Daily reward claimed: +" + d.awarded + " points.");
+      setPlayer({ ...player, points: d.points, lifetimeEarned: player.lifetimeEarned + d.awarded, dailyClaimed: true });
+      setMessage("Daily reward claimed: +" + d.awarded + " points. Rewarded ads are now unlocked.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Claim failed.");
     } finally {
@@ -134,8 +135,8 @@ export default function TelegramApp() {
 
         <p className="game-message" role="status">{message}</p>
         <div className="game-actions">
-          <button className="ad-button" disabled title="Rewarded ad provider connection is not configured">▶ Watch ad · +50 <small>COMING SOON</small></button>
-          <button onClick={daily} disabled={!player || busy}>🎁 Daily reward</button>
+          <button className="ad-button" disabled title={!player?.dailyClaimed ? "Claim your 100 daily points first" : "Rewarded ad provider connection is not configured"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "COMING SOON"}</small></button>
+          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 100 daily points"}</button>
           <button onClick={invite} disabled={!player}>↗ Share & invite</button>
         </div>
       </section>
