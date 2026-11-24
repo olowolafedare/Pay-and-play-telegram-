@@ -37,3 +37,21 @@
 .leader-heading h2{font-size:19px}
 .game-shell footer{font-size:9px}
 @media(max-width:390px){.game-shell{padding:14px 12px}.tap-coin{width:164px;height:164px}.tap-coin span{font-size:68px}.game-actions button{font-size:11px}}
+
+
+/* Gome economy and game interaction polish */
+.coin-total{width:min(100%,340px);margin:0 auto 12px;padding:13px 18px;border:1px solid #594a2b;border-radius:16px;background:linear-gradient(145deg,#292317,#171b28);display:flex;flex-direction:column;gap:5px}
+.coin-total span{font-size:9px;letter-spacing:1.5px;color:#d7bd7b}
+.coin-total strong{font-size:29px;color:#ffe39a;text-shadow:0 0 18px #e7b34a35}
+.coin-total small{font-size:10px;color:#a9b3cb}
+.tap-coin{touch-action:manipulation;user-select:none;-webkit-tap-highlight-color:transparent}
+.tap-coin.is-busy{transform:scale(.96)}
+.tap-queue{margin:-8px 0 12px;font-size:10px;color:#7ee5ce}
+.ad-points-total{margin-top:10px;text-align:left;font-size:10px;color:#9eaccb}
+.game-actions button{touch-action:manipulation}
+
+.connect-button{display:inline-flex;align-items:center;justify-content:center;margin:0 auto 12px;padding:11px 16px;border:1px solid #647ec1;border-radius:11px;background:#17223b;color:#dce5ff;font-size:12px;font-weight:700;cursor:pointer}
+
+.connect-button{display:inline-flex;align-items:center;justify-content:center;margin:0 auto 12px;padding:11px 16px;border:1px solid #647ec1;border-radius:11px;background:#17223b;color:#dce5ff;font-size:12px;font-weight:700;cursor:pointer}
+
+.transaction-row small{display:block;margin-top:5px;font-size:9px;color:#8492b3;line-height:1.4}.transaction-row b{font-size:11px;white-space:nowrap}.transaction-card{margin-top:12px}

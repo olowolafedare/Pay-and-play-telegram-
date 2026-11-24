@@ -28,22 +28,62 @@ export async function POST(req: Request) {
       let referrerDbId: number | null = null;
       if (Number.isSafeInteger(rawReferrerId) && rawReferrerId !== user.id) {
         const referrer = await client.query("SELECT id FROM app_users WHERE telegram_id = $1", [rawReferrerId]);
-        if (referrer.rowCount) referrerDbId = Number(referrer.rows[0].id);
+        if (referrer.rowCount) {
+          referrerDbId = Number(referrer.rows[0].id);
+          // tap_sessions and referrals are keyed by Telegram ID, so ensure
+          // the inviter also exists in the legacy Telegram identity table.
+          await client.query(
+            `INSERT INTO telegram_users (telegram_user_id, username, first_name)
+             SELECT telegram_id, username, first_name FROM app_users WHERE telegram_id = $1
+             ON CONFLICT (telegram_user_id) DO NOTHING`,
+            [rawReferrerId]
+          );
+        }
       }
+
       const saved = await client.query(
         `INSERT INTO app_users (telegram_id, username, first_name, last_name, language_code, referred_by)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name, language_code = EXCLUDED.language_code, last_seen_at = NOW()
-         RETURNING id, telegram_id, username, first_name`,
-        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, referrerDbId]
+         RETURNING id, telegram_id, username, first_name, (xmax = 0) AS is_new_user`,
+        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, rawReferrerId]
       );
       const account = saved.rows[0];
+
       await client.query("INSERT INTO rewards_wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", [account.id]);
-      if (referrerDbId) {
-        await client.query(`INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES ($1, $2) ON CONFLICT (referred_user_id) DO NOTHING`, [referrerDbId, account.id]);
+      await client.query(
+        `INSERT INTO telegram_users (telegram_user_id, username, first_name, last_name, language_code, referred_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (telegram_user_id) DO UPDATE SET username = EXCLUDED.username,
+          first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name,
+          language_code = EXCLUDED.language_code, last_seen_at = NOW()`,
+        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, referrerDbId ? rawReferrerId : null]
+      );
+
+      // A referral is rewarded once, only for a genuinely new Telegram account.
+      // The referrals table stores Telegram IDs, while rewards_wallets stores app_users IDs.
+      if (referrerDbId && account.is_new_user) {
+        const referral = await client.query(
+          `INSERT INTO referrals (referrer_user_id, referred_user_id, status, bonus_awarded, qualified_at)
+           VALUES ($1, $2, 'qualified', 10, NOW())
+           ON CONFLICT (referred_user_id) DO NOTHING
+           RETURNING id`,
+          [referrerDbId, account.id]
+        );
+        if (referral.rowCount) {
+          await client.query(
+            "UPDATE rewards_wallets SET gome_coins = gome_coins + 10, updated_at = NOW() WHERE user_id = $1",
+            [referrerDbId]
+          );
+          await client.query(
+            "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'referral_bonus', 10, $2, $3)",
+            [referrerDbId, `referral:${account.id}`, JSON.stringify({ referredUserId: String(account.telegram_id), gomeCoins: 10 })]
+          );
+        }
       }
-      const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned FROM rewards_wallets WHERE user_id = $1", [account.id]);
+
+      const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned, gome_coins, conversion_remainder FROM rewards_wallets WHERE user_id = $1", [account.id]);
       const dailyClaim = await client.query("SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE", [account.id]);
       const adPoints = Number(wallet.rows[0].ad_points_earned);
       const level = progression(adPoints);
@@ -51,6 +91,8 @@ export async function POST(req: Request) {
       return NextResponse.json({
         user: { id: String(account.telegram_id), name: account.first_name, username: account.username },
         points: Number(wallet.rows[0].points),
+        gomeCoins: Number(wallet.rows[0].gome_coins),
+        conversionRemainder: Number(wallet.rows[0].conversion_remainder),
         lifetimeEarned: Number(wallet.rows[0].lifetime_earned),
         adPointsEarned: adPoints,
         tapLevel: level.level,
