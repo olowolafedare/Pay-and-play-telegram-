@@ -19,7 +19,8 @@ export async function POST(req: Request) {
   try {
     const { user } = verifyTelegramInitData(getInitData(req));
     const body = await req.json().catch(() => ({}));
-    const count = Math.max(1, Math.min(1, Math.floor(Number(body.tapCount ?? 1))));
+    const requested = Number(body.tapCount ?? 1);
+    const count = Number.isFinite(requested) ? Math.max(1, Math.min(10, Math.floor(requested))) : 1;
     const c = await db.connect();
     try {
       await c.query("BEGIN");
@@ -29,13 +30,15 @@ export async function POST(req: Request) {
       );
       if (!w.rowCount) throw new Error("Complete Telegram sign-in first");
 
+      // One server request can safely credit a small batch of real taps.
+      // This prevents slow mobile-network round trips from dropping taps.
       const recent = await c.query(
-        "SELECT id FROM tap_sessions WHERE user_id = $1 AND created_at > NOW() - INTERVAL '250 milliseconds' LIMIT 1",
+        "SELECT id FROM tap_sessions WHERE user_id = $1 AND created_at > NOW() - INTERVAL '120 milliseconds' LIMIT 1",
         [user.id]
       );
       if (recent.rowCount) {
         await c.query("ROLLBACK");
-        return NextResponse.json({ error: "Please slow down." }, { status: 429 });
+        return NextResponse.json({ error: "Tap received too quickly. Try again." }, { status: 429 });
       }
 
       const power = tapPower(Number(w.rows[0].ad_points_earned));
@@ -44,15 +47,20 @@ export async function POST(req: Request) {
         "UPDATE rewards_wallets SET points = points + $1, lifetime_earned = lifetime_earned + $1, updated_at = NOW() WHERE user_id = $2",
         [points, w.rows[0].user_id]
       );
-      // tap_sessions is keyed by Telegram ID and stores tap count, not points.
       await c.query("INSERT INTO tap_sessions(user_id, taps) VALUES($1, $2)", [user.id, count]);
       await c.query(
         "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'tap', $2, $3, $4)",
         [w.rows[0].user_id, points, randomUUID(), JSON.stringify({ count, tapPower: power })]
       );
-      const updated = await c.query("SELECT points FROM rewards_wallets WHERE user_id = $1", [w.rows[0].user_id]);
+      const updated = await c.query("SELECT points, lifetime_earned FROM rewards_wallets WHERE user_id = $1", [w.rows[0].user_id]);
       await c.query("COMMIT");
-      return NextResponse.json({ points: Number(updated.rows[0].points), awarded: points, tapPower: power });
+      return NextResponse.json({
+        points: Number(updated.rows[0].points),
+        lifetimeEarned: Number(updated.rows[0].lifetime_earned),
+        awarded: points,
+        tapPower: power,
+        taps: count
+      });
     } catch (e) {
       await c.query("ROLLBACK");
       throw e;
