@@ -32,6 +32,7 @@ export default function TelegramApp() {
   const [message, setMessage] = useState("Connecting to Telegram...");
   const tapQueue = useRef(0);
   const tapRunning = useRef(false);
+  const tapTimes = useRef<number[]>([]);
 
   const api = useCallback(async (path: string, method: "GET" | "POST" = "GET", body?: unknown) => {
     const r = await fetch(path, {
@@ -100,7 +101,7 @@ export default function TelegramApp() {
     tapRunning.current = true;
     try {
       while (tapQueue.current > 0) {
-        const batch = Math.min(10, tapQueue.current);
+        const batch = Math.min(5, tapQueue.current);
         tapQueue.current -= batch;
         setTapPending(tapQueue.current);
         try {
@@ -132,7 +133,14 @@ export default function TelegramApp() {
       setMessage("Connecting your player account. Please wait, then tap again.");
       return;
     }
-    tapQueue.current = Math.min(tapQueue.current + 1, 100);
+    const now = Date.now();
+    tapTimes.current = tapTimes.current.filter(time => now - time < 21_000);
+    if (tapTimes.current.length >= 5) {
+      setMessage("You have used 5 taps. Wait 20 seconds before tapping again.");
+      return;
+    }
+    tapTimes.current.push(now);
+    tapQueue.current = Math.min(tapQueue.current + 1, 5);
     setTapPending(tapQueue.current);
     void drainTapQueue();
   }
