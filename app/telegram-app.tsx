@@ -142,13 +142,13 @@ export default function TelegramApp() {
       const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
       const result = await showAd({ ymid, requestVar: "daily_reward_ad" });
       if (result?.reward_event_type === "valued") {
-        setMessage("Valued ad confirmed. Checking for your secure 50-point credit…");
+        setMessage("Valued ad confirmed. Checking for your secure " + adReward + "-point credit…");
         for (let attempt = 0; attempt < 5; attempt++) {
           await new Promise(resolve => setTimeout(resolve, 1800));
           const p = await api("/api/telegram/auth", "POST");
           setPlayer(p);
           if (p.adPointsEarned > player.adPointsEarned) {
-            setMessage("Reward credited: +50 points.");
+            setMessage("Reward credited: +" + adReward + " points.");
             break;
           }
           if (attempt === 4) setMessage("Ad confirmed. The server credit is still processing; your balance will refresh shortly.");
@@ -202,6 +202,8 @@ export default function TelegramApp() {
 
   const nextLevel = player ? Math.min(10, player.tapLevel + 1) : 2;
   const generatedCoins = player ? Math.floor(player.lifetimeEarned / 10) : 0;
+  const dailyReward = 200 * (player?.tapLevel ?? 1);
+  const adReward = Math.floor(dailyReward * 0.25);
 
   return (
     <main className="game-shell">
@@ -244,8 +246,8 @@ export default function TelegramApp() {
           else setMessage("Telegram has not supplied a signed session. Close this screen and reopen Gome from the bot's Mini App button.");
         }}>↻ Reconnect Telegram</button>}
         <div className="game-actions">
-          <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +50 <small>{adSdkReady ? "REWARDED AD READY" : "CONNECTING TO MONETAG"}</small></button>
-          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 50 daily points"}</button>
+          <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +{adReward} <small>{adSdkReady ? "REWARDED AD READY" : "CONNECTING TO MONETAG"}</small></button>
+          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim " + dailyReward + " daily points"}</button>
           <button onClick={invite} disabled={!player}>↗ Invite & earn 10 Gome Coins</button>
         </div>
       </section>
