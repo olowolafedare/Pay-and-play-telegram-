@@ -96,33 +96,40 @@ export default function TelegramApp() {
   const drainTapQueue = useCallback(async () => {
     if (tapRunning.current) return;
     tapRunning.current = true;
-    while (tapQueue.current > 0) {
-      tapQueue.current -= 1;
-      setTapPending(tapQueue.current);
-      try {
-        const d = await api("/api/game/tap", "POST", { tapCount: 1 });
-        setPlayer(previous => previous ? {
-          ...previous,
-          points: d.points,
-          lifetimeEarned: previous.lifetimeEarned + d.awarded,
-          tapLevel: d.tapPower ?? previous.tapLevel,
-        } : previous);
-        setMessage("+" + d.awarded + " point" + (d.awarded === 1 ? "" : "s") + " collected.");
-      } catch (e) {
-        tapQueue.current = 0;
-        setTapPending(0);
-        setMessage(e instanceof Error ? e.message : "Tap failed. Please try again.");
-        break;
+    try {
+      while (tapQueue.current > 0) {
+        const batch = Math.min(10, tapQueue.current);
+        tapQueue.current -= batch;
+        setTapPending(tapQueue.current);
+        try {
+          const d = await api("/api/game/tap", "POST", { tapCount: batch });
+          setPlayer(previous => previous ? {
+            ...previous,
+            points: d.points,
+            lifetimeEarned: d.lifetimeEarned ?? previous.lifetimeEarned + d.awarded,
+            tapLevel: d.tapPower ?? previous.tapLevel,
+          } : previous);
+          setMessage("+" + d.awarded + " points collected from " + (d.taps ?? batch) + " taps.");
+        } catch (e) {
+          tapQueue.current = 0;
+          setTapPending(0);
+          setMessage(e instanceof Error ? e.message : "Tap failed. Please try again.");
+          break;
+        }
       }
-      if (tapQueue.current > 0) await new Promise(resolve => setTimeout(resolve, 270));
+    } finally {
+      tapRunning.current = false;
+      setTapPending(0);
+      if (tapQueue.current > 0) void drainTapQueue();
     }
-    tapRunning.current = false;
-    setTapPending(0);
   }, [api]);
 
   function tap() {
-    if (!player) return;
-    tapQueue.current = Math.min(tapQueue.current + 1, 20);
+    if (!player) {
+      setMessage("Connecting your player account. Please wait, then tap again.");
+      return;
+    }
+    tapQueue.current = Math.min(tapQueue.current + 1, 100);
     setTapPending(tapQueue.current);
     void drainTapQueue();
   }
@@ -215,7 +222,7 @@ export default function TelegramApp() {
         <div className="coin-total">
           <span>GOME COINS GENERATED</span>
           <strong>◈ {generatedCoins.toLocaleString()}</strong>
-          <small>10 lifetime points = 1 Gome Coin · referral bonus: 10 Gome Coins</small>
+          <small>CONVERSION: 10 points = 1 Gome Coin · referral bonus: 10 Gome Coins</small>
         </div>
 
         <button className={"tap-coin " + (tapPending > 0 ? "is-busy" : "")} onClick={tap} disabled={!player} aria-label="Tap Gome coin to earn points">
