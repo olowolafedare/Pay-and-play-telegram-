@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 declare global {
   interface Window {
@@ -25,7 +25,10 @@ export default function TelegramApp() {
   const [player, setPlayer] = useState<Player | null>(null);
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [busy, setBusy] = useState(false);
+  const [tapPending, setTapPending] = useState(0);
   const [message, setMessage] = useState("Open this Mini App inside Telegram to play.");
+  const tapQueue = useRef(0);
+  const tapRunning = useRef(false);
 
   const api = useCallback(async (path: string, method: "GET" | "POST" = "GET", body?: unknown) => {
     const r = await fetch(path, {
@@ -64,17 +67,38 @@ export default function TelegramApp() {
     if (initData) void refresh();
   }, [initData, refresh]);
 
-  async function tap() {
-    if (!player || busy) return;
-    setBusy(true);
-    try {
-      const d = await api("/api/game/tap", "POST", { tapCount: 1 });
-      setPlayer({ ...player, points: d.points, lifetimeEarned: player.lifetimeEarned + d.awarded });
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Tap failed.");
-    } finally {
-      setBusy(false);
+  const drainTapQueue = useCallback(async () => {
+    if (tapRunning.current) return;
+    tapRunning.current = true;
+    while (tapQueue.current > 0) {
+      tapQueue.current -= 1;
+      setTapPending(tapQueue.current);
+      try {
+        const d = await api("/api/game/tap", "POST", { tapCount: 1 });
+        setPlayer(previous => previous ? {
+          ...previous,
+          points: d.points,
+          lifetimeEarned: previous.lifetimeEarned + d.awarded,
+          tapLevel: d.tapPower ?? previous.tapLevel,
+        } : previous);
+        setMessage("+" + d.awarded + " point" + (d.awarded === 1 ? "" : "s") + " collected.");
+      } catch (e) {
+        tapQueue.current = 0;
+        setTapPending(0);
+        setMessage(e instanceof Error ? e.message : "Tap failed. Please try again.");
+        break;
+      }
+      if (tapQueue.current > 0) await new Promise(resolve => setTimeout(resolve, 270));
     }
+    tapRunning.current = false;
+    setTapPending(0);
+  }, [api]);
+
+  function tap() {
+    if (!player) return;
+    tapQueue.current = Math.min(tapQueue.current + 1, 20);
+    setTapPending(tapQueue.current);
+    void drainTapQueue();
   }
 
   async function watchAd() {
@@ -86,9 +110,19 @@ export default function TelegramApp() {
       const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
       const result = await showAd({ ymid, requestVar: "daily_reward_ad" });
       if (result?.reward_event_type === "valued") {
-        setMessage("Monetag confirmed a valued ad. Your 50-point reward is awaiting secure server credit.");
+        setMessage("Valued ad confirmed. Checking for your secure 50-point credit…");
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 1800));
+          const p = await api("/api/telegram/auth", "POST");
+          setPlayer(p);
+          if (p.adPointsEarned > player.adPointsEarned) {
+            setMessage("Reward credited: +50 points.");
+            break;
+          }
+          if (attempt === 4) setMessage("Ad confirmed. The server credit is still processing; your balance will refresh shortly.");
+        }
       } else {
-        setMessage("Ad completed, but Monetag did not mark it as a paid event. No points awarded.");
+        setMessage("Ad completed, but Monetag did not mark it as a valued event. No points awarded.");
       }
     } catch {
       setMessage("The ad could not be verified. Please try again.");
@@ -102,7 +136,7 @@ export default function TelegramApp() {
     setBusy(true);
     try {
       const d = await api("/api/game/daily", "POST");
-      setPlayer({ ...player, points: d.points, lifetimeEarned: player.lifetimeEarned + d.awarded, dailyClaimed: true });
+      setPlayer(previous => previous ? { ...previous, points: d.points, lifetimeEarned: previous.lifetimeEarned + d.awarded, dailyClaimed: true } : previous);
       setMessage("Daily reward claimed: +" + d.awarded + " points. Rewarded ads are now unlocked.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Claim failed.");
@@ -111,54 +145,72 @@ export default function TelegramApp() {
     }
   }
 
-  function invite() {
+  async function invite() {
     if (!player) return;
-    const bot = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
-    if (!bot) {
-      setMessage("Bot username is not configured yet.");
-      return;
-    }
-    const link = "https://t.me/" + bot + "?startapp=" + player.referralCode;
+    const link = "https://t.me/Payandplayxedruobot/Gomecoin?startapp=" + encodeURIComponent(player.referralCode);
     const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Join me on Gome and play to earn points!");
-    const webApp = window.Telegram?.WebApp;
-    if (webApp?.openTelegramLink) webApp.openTelegramLink(shareUrl);
-    else if (navigator.share) void navigator.share({ title: "Join Gome", text: "Play Gome with me!", url: link }).catch(() => undefined);
-    else void navigator.clipboard.writeText(link).then(() => setMessage("Referral link copied."));
+    try {
+      const webApp = window.Telegram?.WebApp;
+      if (webApp?.openTelegramLink) {
+        webApp.openTelegramLink(shareUrl);
+        setMessage("Choose a Telegram chat to share your personal invite link.");
+      } else if (navigator.share) {
+        await navigator.share({ title: "Join Gome", text: "Play Gome with me!", url: link });
+        setMessage("Your invite link is ready to share.");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+        setMessage("Your personal invite link has been copied.");
+      } else {
+        window.prompt("Copy your Gome invite link:", link);
+      }
+    } catch {
+      setMessage("Sharing was cancelled. You can try again.");
+    }
   }
 
   const nextLevel = player ? Math.min(10, player.tapLevel + 1) : 2;
+  const generatedCoins = player ? Math.floor(player.lifetimeEarned / 10) : 0;
+  const pointsToNextCoin = player ? (10 - (player.lifetimeEarned % 10)) % 10 : 0;
 
   return (
     <main className="game-shell">
       <header className="game-header">
         <div className="brand"><span className="brand-mark">G</span><span>GOME <b>COIN</b></span></div>
-        <span className="tag">MINI APP</span>
+        <span className="tag">TAP TO EARN</span>
       </header>
 
       <section className="game-hero">
-        <div className="eyebrow"><span className="pulse" /> TAP • PLAY • GROW</div>
+        <div className="eyebrow"><span className="pulse" /> YOUR GOME JOURNEY</div>
         <div className="balance-card">
-          <span>YOUR POINTS</span>
+          <span>AVAILABLE GAME POINTS</span>
           <strong>{player ? player.points.toLocaleString() : "—"}</strong>
-          <small>Game points · no cash value</small>
+          <small>Points earned through play · not cash</small>
         </div>
 
-        <button className={"tap-coin " + (busy ? "is-busy" : "")} onClick={tap} disabled={!player || busy} aria-label="Tap Gome coin to earn points">
+        <div className="coin-total">
+          <span>GOME COINS GENERATED</span>
+          <strong>◈ {generatedCoins.toLocaleString()}</strong>
+          <small>10 lifetime points = 1 Gome Coin</small>
+        </div>
+
+        <button className={"tap-coin " + (tapPending > 0 ? "is-busy" : "")} onClick={tap} disabled={!player} aria-label="Tap Gome coin to earn points">
           <span>G</span><small>GOME</small>
         </button>
         <div className="tap-power">{player ? player.tapLevel : 1} <span>POINT{player?.tapLevel === 1 ? "" : "S"} PER TAP</span></div>
+        {tapPending > 0 && <p className="tap-queue">{tapPending} tap{tapPending === 1 ? "" : "s"} queued</p>}
 
         <div className="upgrade-card">
           <div className="upgrade-heading"><span>LEVEL {player?.tapLevel ?? 1}</span><b>{player?.upgradeProgress ?? 0}%</b></div>
           <div className="progress-track"><div className="progress-fill" style={{ width: (player?.upgradeProgress ?? 0) + "%" }} /></div>
-          <div className="upgrade-footer"><span>UPGRADE PROGRESS</span><strong>{player?.tapLevel === 10 ? "MAX LEVEL" : "NEXT: LEVEL " + nextLevel}</strong></div>
+          <div className="upgrade-footer"><span>AD POINT UPGRADE PROGRESS</span><strong>{player?.tapLevel === 10 ? "MAX LEVEL" : "NEXT: LEVEL " + nextLevel}</strong></div>
+          <div className="ad-points-total">Verified ad points: {(player?.adPointsEarned ?? 0).toLocaleString()}</div>
         </div>
 
         <p className="game-message" role="status">{message}</p>
         <div className="game-actions">
           <button className="ad-button" onClick={watchAd} disabled={!player?.dailyClaimed || busy} title={!player?.dailyClaimed ? "Claim your 100 daily points first" : "Watch a Monetag rewarded interstitial"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "REWARDED AD"}</small></button>
           <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 100 daily points"}</button>
-          <button onClick={invite} disabled={!player}>↗ Share & invite</button>
+          <button onClick={invite} disabled={!player}>↗ Invite & share</button>
         </div>
       </section>
 
