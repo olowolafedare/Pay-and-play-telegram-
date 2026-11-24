@@ -1,20 +1,17 @@
-# Pay and Play — Telegram Mini App
+# Pay and Play Telegram Mini App
 
-Separate Telegram game and rewards experience. The existing Pay and Play financial application is a different project and must remain untouched.
-
-## Pre-launch scope
-- Telegram authentication (server-verified `initData` before enabling accounts)
-- Points-only rewards wallet
-- Tap-to-earn, daily rewards, referrals and leaderboard
-- No deposits, withdrawals, crypto wallet or cash claims in the game
+Separate pre-launch game for tapping, rewards points, daily claims and leaderboard. It is not the Pay and Play financial wallet.
 
 ## Stack
-Next.js, TypeScript, Telegram Mini Apps SDK, Neon PostgreSQL and Vercel.
+Next.js + TypeScript, Telegram Mini Apps signed initData verification, Neon PostgreSQL, Vercel.
 
-## Development
-```bash
-npm install
-npm run dev
-```
+## Environment
+- DATABASE_URL: encrypted Vercel variable, dedicated Telegram Neon branch.
+- TELEGRAM_BOT_TOKEN: add privately in Vercel Project Settings > Environment Variables. Never commit it.
+- NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: bot username without @.
+- GAME_POINTS_PER_TAP (default 1), GAME_DAILY_POINTS (default 25).
 
-Never put Telegram bot tokens or database credentials in browser code. Add secrets through Vercel environment variables only.
+## Run
+npm install && npm run dev
+
+The server validates Telegram's HMAC-signed initData. It does not trust initDataUnsafe. Points are game scores only; no deposits, withdrawals, crypto wallet or guaranteed cash conversion. Any later reward claim requires published rules, funding, eligibility/KYC and a separate financial ledger.
