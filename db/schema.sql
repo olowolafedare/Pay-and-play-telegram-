@@ -4,7 +4,7 @@ CREATE TABLE app_users (
 );
 CREATE TABLE rewards_wallets (
  user_id BIGINT PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE, points BIGINT NOT NULL DEFAULT 0 CHECK(points>=0),
- lifetime_earned BIGINT NOT NULL DEFAULT 0 CHECK(lifetime_earned>=0), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+ lifetime_earned BIGINT NOT NULL DEFAULT 0 CHECK(lifetime_earned>=0), ad_points_earned BIGINT NOT NULL DEFAULT 0 CHECK(ad_points_earned>=0), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE TABLE rewards_transactions (
  id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
