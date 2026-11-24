@@ -264,17 +264,19 @@ export default function TelegramApp() {
 
         <p className="game-message" role="status">{message}</p>
         {!player && <button className="connect-button" onClick={() => {
-          const data = window.Telegram?.WebApp?.initData || initData;
-          if (!data) {
-            setMessage("Telegram has not supplied a signed session. Open this Mini App using the bot's Gome button inside Telegram.");
+          const webApp = window.Telegram?.WebApp;
+          const data = webApp?.initData || initData;
+          if (data) {
+            if (data !== initData) setInitData(data);
+            setMessage("Signing in securely with your Telegram account...");
+            void refresh();
             return;
           }
-          if (data !== initData) setInitData(data);
-          else {
-            setMessage("Reconnecting your Telegram account...");
-            void refresh();
-          }
-        }}>↻ Reconnect Telegram</button>}
+          setMessage("Opening the official Gome bot so Telegram can identify your account...");
+          const botMiniApp = "https://t.me/Payandplayxedruobot/Gomecoin";
+          if (webApp?.openTelegramLink) webApp.openTelegramLink(botMiniApp);
+          else window.location.href = botMiniApp;
+        }}>↻ Log in with Telegram</button>}
         <div className="game-actions">
           <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +{adReward} <small>{adSdkReady ? "REWARDED AD READY" : "CONNECTING TO MONETAG"}</small></button>
           <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim " + dailyReward + " daily points"}</button>
