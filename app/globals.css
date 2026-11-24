@@ -51,3 +51,5 @@
 .game-actions button{touch-action:manipulation}
 
 .connect-button{display:inline-flex;align-items:center;justify-content:center;margin:0 auto 12px;padding:11px 16px;border:1px solid #647ec1;border-radius:11px;background:#17223b;color:#dce5ff;font-size:12px;font-weight:700;cursor:pointer}
+
+.connect-button{display:inline-flex;align-items:center;justify-content:center;margin:0 auto 12px;padding:11px 16px;border:1px solid #647ec1;border-radius:11px;background:#17223b;color:#dce5ff;font-size:12px;font-weight:700;cursor:pointer}
