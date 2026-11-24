@@ -120,7 +120,6 @@ export default function TelegramApp() {
     } finally {
       tapRunning.current = false;
       setTapPending(0);
-      if (tapQueue.current > 0) void drainTapQueue();
     }
   }, [api]);
 
