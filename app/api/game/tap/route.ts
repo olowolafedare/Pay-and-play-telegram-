@@ -28,16 +28,28 @@ export async function POST(req: Request) {
         [user.id]
       );
       if (!w.rowCount) throw new Error("Complete Telegram sign-in first");
-      const recent = await c.query("SELECT id FROM tap_sessions WHERE user_id = $1 AND created_at > NOW() - INTERVAL '250 milliseconds' LIMIT 1", [w.rows[0].user_id]);
+
+      const recent = await c.query(
+        "SELECT id FROM tap_sessions WHERE user_id = $1 AND created_at > NOW() - INTERVAL '250 milliseconds' LIMIT 1",
+        [user.id]
+      );
       if (recent.rowCount) {
         await c.query("ROLLBACK");
         return NextResponse.json({ error: "Please slow down." }, { status: 429 });
       }
+
       const power = tapPower(Number(w.rows[0].ad_points_earned));
       const points = count * power;
-      await c.query("UPDATE rewards_wallets SET points = points + $1, lifetime_earned = lifetime_earned + $1, updated_at = NOW() WHERE user_id = $2", [points, w.rows[0].user_id]);
-      await c.query("INSERT INTO tap_sessions(user_id, tap_count, points_awarded) VALUES($1, $2, $3)", [w.rows[0].user_id, count, points]);
-      await c.query("INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'tap', $2, $3, $4)", [w.rows[0].user_id, points, randomUUID(), JSON.stringify({ count, tapPower: power })]);
+      await c.query(
+        "UPDATE rewards_wallets SET points = points + $1, lifetime_earned = lifetime_earned + $1, updated_at = NOW() WHERE user_id = $2",
+        [points, w.rows[0].user_id]
+      );
+      // tap_sessions is keyed by Telegram ID and stores tap count, not points.
+      await c.query("INSERT INTO tap_sessions(user_id, taps) VALUES($1, $2)", [user.id, count]);
+      await c.query(
+        "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'tap', $2, $3, $4)",
+        [w.rows[0].user_id, points, randomUUID(), JSON.stringify({ count, tapPower: power })]
+      );
       const updated = await c.query("SELECT points FROM rewards_wallets WHERE user_id = $1", [w.rows[0].user_id]);
       await c.query("COMMIT");
       return NextResponse.json({ points: Number(updated.rows[0].points), awarded: points, tapPower: power });
