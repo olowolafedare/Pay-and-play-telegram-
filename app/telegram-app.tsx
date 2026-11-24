@@ -11,6 +11,8 @@ declare global {
 type Player = {
   user: { id: string; name: string; username?: string };
   points: number;
+  gomeCoins: number;
+  conversionRemainder: number;
   lifetimeEarned: number;
   adPointsEarned: number;
   tapLevel: number;
@@ -49,7 +51,7 @@ export default function TelegramApp() {
       setPlayer(p);
       const l = await api("/api/leaderboard");
       setLeaders(l.leaderboard);
-      setMessage("Tap the Gome coin to collect points.");
+      setMessage("Tap the Gome coin to use Live Points and earn Gome Coins.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Unable to connect.");
     }
@@ -106,10 +108,12 @@ export default function TelegramApp() {
           setPlayer(previous => previous ? {
             ...previous,
             points: d.points,
-            lifetimeEarned: d.lifetimeEarned ?? previous.lifetimeEarned + d.awarded,
+            gomeCoins: d.gomeCoins,
+            conversionRemainder: d.conversionRemainder,
+            lifetimeEarned: previous.lifetimeEarned,
             tapLevel: d.tapPower ?? previous.tapLevel,
           } : previous);
-          setMessage("+" + d.awarded + " points collected from " + (d.taps ?? batch) + " taps.");
+          setMessage("Used " + d.spent + " Live Points · earned " + d.gomeCoinsEarned + " Gome Coins.");
         } catch (e) {
           tapQueue.current = 0;
           setTapPending(0);
@@ -201,7 +205,7 @@ export default function TelegramApp() {
   }
 
   const nextLevel = player ? Math.min(10, player.tapLevel + 1) : 2;
-  const generatedCoins = player ? Math.floor(player.lifetimeEarned / 10) : 0;
+  const generatedCoins = player?.gomeCoins ?? 0;
   const dailyReward = 200 * (player?.tapLevel ?? 1);
   const adReward = Math.floor(dailyReward * 0.25);
 
@@ -217,19 +221,19 @@ export default function TelegramApp() {
         <div className="balance-card">
           <span>AVAILABLE GAME POINTS</span>
           <strong>{player ? player.points.toLocaleString() : "—"}</strong>
-          <small>Points earned through play · not cash</small>
+          <small>Tap to consume points · game balance only</small>
         </div>
 
         <div className="coin-total">
-          <span>GOME COINS GENERATED</span>
+          <span>GOME COIN BALANCE</span>
           <strong>◈ {generatedCoins.toLocaleString()}</strong>
-          <small>CONVERSION: 10 points = 1 Gome Coin · referral bonus: 10 Gome Coins</small>
+          <small>CONVERSION: 10 Live Points consumed = 1 Gome Coin · referrals credit 10 directly</small>
         </div>
 
         <button className={"tap-coin " + (tapPending > 0 ? "is-busy" : "")} onClick={tap} disabled={!player} aria-label="Tap Gome coin to earn points">
           <span>G</span><small>GOME</small>
         </button>
-        <div className="tap-power">{player ? player.tapLevel : 1} <span>POINT{player?.tapLevel === 1 ? "" : "S"} PER TAP</span></div>
+        <div className="tap-power">{player ? player.tapLevel : 1} <span>POINT{player?.tapLevel === 1 ? "" : "S"} SPENT PER TAP</span></div>
         {tapPending > 0 && <p className="tap-queue">{tapPending} tap{tapPending === 1 ? "" : "s"} queued</p>}
 
         <div className="upgrade-card">
