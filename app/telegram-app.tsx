@@ -148,14 +148,14 @@ export default function TelegramApp() {
   async function invite() {
     if (!player) return;
     const link = "https://t.me/Payandplayxedruobot/Gomecoin?startapp=" + encodeURIComponent(player.referralCode);
-    const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Join me on Gome and play to earn points!");
+    const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Join me on Gome! You can earn points by playing. I get 10 Gome Coins when you join through my invite.");
     try {
       const webApp = window.Telegram?.WebApp;
       if (webApp?.openTelegramLink) {
         webApp.openTelegramLink(shareUrl);
         setMessage("Choose a Telegram chat to share your personal invite link.");
       } else if (navigator.share) {
-        await navigator.share({ title: "Join Gome", text: "Play Gome with me!", url: link });
+        await navigator.share({ title: "Join Gome", text: "Play Gome with me! Join through my invite and help me earn 10 Gome Coins.", url: link });
         setMessage("Your invite link is ready to share.");
       } else if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(link);
@@ -170,7 +170,6 @@ export default function TelegramApp() {
 
   const nextLevel = player ? Math.min(10, player.tapLevel + 1) : 2;
   const generatedCoins = player ? Math.floor(player.lifetimeEarned / 10) : 0;
-  const pointsToNextCoin = player ? (10 - (player.lifetimeEarned % 10)) % 10 : 0;
 
   return (
     <main className="game-shell">
@@ -190,7 +189,7 @@ export default function TelegramApp() {
         <div className="coin-total">
           <span>GOME COINS GENERATED</span>
           <strong>◈ {generatedCoins.toLocaleString()}</strong>
-          <small>10 lifetime points = 1 Gome Coin</small>
+          <small>10 lifetime points = 1 Gome Coin · referral bonus: 10 Gome Coins</small>
         </div>
 
         <button className={"tap-coin " + (tapPending > 0 ? "is-busy" : "")} onClick={tap} disabled={!player} aria-label="Tap Gome coin to earn points">
@@ -210,7 +209,7 @@ export default function TelegramApp() {
         <div className="game-actions">
           <button className="ad-button" onClick={watchAd} disabled={!player?.dailyClaimed || busy} title={!player?.dailyClaimed ? "Claim your 100 daily points first" : "Watch a Monetag rewarded interstitial"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "REWARDED AD"}</small></button>
           <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 100 daily points"}</button>
-          <button onClick={invite} disabled={!player}>↗ Invite & share</button>
+          <button onClick={invite} disabled={!player}>↗ Invite & earn 10 Gome Coins</button>
         </div>
       </section>
 
