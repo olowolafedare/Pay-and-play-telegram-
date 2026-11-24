@@ -28,3 +28,8 @@ CREATE TABLE referrals (
 CREATE INDEX idx_rewards_transactions_user_created ON rewards_transactions(user_id,created_at DESC);
 CREATE INDEX idx_tap_sessions_user_created ON tap_sessions(user_id,created_at DESC);
 CREATE INDEX idx_referrals_referrer ON referrals(referrer_user_id,created_at DESC);
+
+
+ALTER TABLE rewards_wallets ADD COLUMN IF NOT EXISTS gome_coins BIGINT NOT NULL DEFAULT 0 CHECK (gome_coins >= 0), ADD COLUMN IF NOT EXISTS conversion_remainder BIGINT NOT NULL DEFAULT 0 CHECK (conversion_remainder >= 0 AND conversion_remainder < 10);
+ALTER TABLE rewards_transactions DROP CONSTRAINT IF EXISTS rewards_transactions_type_check;
+ALTER TABLE rewards_transactions ADD CONSTRAINT rewards_transactions_type_check CHECK (type IN ('tap','tap_spend','daily_reward','referral_bonus','admin_adjustment'));
