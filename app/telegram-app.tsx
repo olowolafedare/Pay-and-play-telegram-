@@ -102,7 +102,7 @@ export default function TelegramApp() {
   }
 
   async function watchAd() {
-    if (!player || !player.dailyClaimed || busy) return;
+    if (!player || busy) return;
     const showAd = window.show_12342383;
     if (!showAd) { setMessage("Ad service is still loading. Please try again."); return; }
     setBusy(true);
@@ -137,7 +137,7 @@ export default function TelegramApp() {
     try {
       const d = await api("/api/game/daily", "POST");
       setPlayer(previous => previous ? { ...previous, points: d.points, lifetimeEarned: previous.lifetimeEarned + d.awarded, dailyClaimed: true } : previous);
-      setMessage("Daily reward claimed: +" + d.awarded + " points. Rewarded ads are now unlocked.");
+      setMessage("Daily reward claimed: +" + d.awarded + " points.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Claim failed.");
     } finally {
@@ -207,7 +207,7 @@ export default function TelegramApp() {
 
         <p className="game-message" role="status">{message}</p>
         <div className="game-actions">
-          <button className="ad-button" onClick={watchAd} disabled={!player?.dailyClaimed || busy} title={!player?.dailyClaimed ? "Claim your 100 daily points first" : "Watch a Monetag rewarded interstitial"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "REWARDED AD"}</small></button>
+          <button className="ad-button" onClick={watchAd} disabled={!player || busy} title="Watch a Monetag rewarded interstitial">▶ Watch ad · +50 <small>REWARDED AD</small></button>
           <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim 100 daily points"}</button>
           <button onClick={invite} disabled={!player}>↗ Invite & earn 10 Gome Coins</button>
         </div>
