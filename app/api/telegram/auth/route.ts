@@ -47,7 +47,7 @@ export async function POST(req: Request) {
          ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name, language_code = EXCLUDED.language_code, last_seen_at = NOW()
          RETURNING id, telegram_id, username, first_name, (xmax = 0) AS is_new_user`,
-        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, referrerDbId]
+        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, rawReferrerId]
       );
       const account = saved.rows[0];
 
