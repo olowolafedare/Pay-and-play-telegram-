@@ -21,11 +21,12 @@ type Player = {
   referralCode: string;
 };
 type Leader = { rank: number; name: string; points: number };
+type Transaction = { id: string; type: string; points: number; metadata: Record<string, unknown>; createdAt: string };
 
 export default function TelegramApp() {
   const [initData, setInitData] = useState("");
   const [player, setPlayer] = useState<Player | null>(null);
-  const [leaders, setLeaders] = useState<Leader[]>([]);
+  const [leaders, setLeaders] = useState<Leader[]>([]);\n  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [busy, setBusy] = useState(false);
   const [adSdkReady, setAdSdkReady] = useState(false);
   const [tapPending, setTapPending] = useState(0);
@@ -45,7 +46,7 @@ export default function TelegramApp() {
     return d;
   }, [initData]);
 
-  const refresh = useCallback(async () => {
+  const loadTransactions = useCallback(async () => {\n    if (!initData) return;\n    try { const result = await api("/api/game/transactions"); setTransactions(result.transactions ?? []); } catch { /* keep the game usable if history is temporarily unavailable */ }\n  }, [api, initData]);\n\n  const refresh = useCallback(async () => {
     if (!initData) return;
     try {
       const p = await api("/api/telegram/auth", "POST");
@@ -114,7 +115,7 @@ export default function TelegramApp() {
             lifetimeEarned: previous.lifetimeEarned,
             tapLevel: d.tapPower ?? previous.tapLevel,
           } : previous);
-          setMessage("Used " + d.spent + " Live Points · earned " + d.gomeCoinsEarned + " Gome Coins.");
+          setMessage("Used " + d.spent + " Live Points · earned " + d.gomeCoinsEarned + " Gome Coins.");\n          void loadTransactions();
         } catch (e) {
           tapQueue.current = 0;
           setTapPending(0);
@@ -181,7 +182,7 @@ export default function TelegramApp() {
     try {
       const d = await api("/api/game/daily", "POST");
       setPlayer(previous => previous ? { ...previous, points: d.points, lifetimeEarned: previous.lifetimeEarned + d.awarded, dailyClaimed: true } : previous);
-      setMessage("Daily reward claimed: +" + d.awarded + " points.");
+      setMessage("Daily reward claimed: +" + d.awarded + " points.");\n      void loadTransactions();
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Claim failed.");
     } finally {
@@ -267,6 +268,18 @@ export default function TelegramApp() {
       <section className="leader-card">
         <div className="leader-heading"><div><span className="eyebrow">COMMUNITY</span><h2>Leaderboard</h2></div><span className="tag">TOP 20</span></div>
         {leaders.length ? leaders.slice(0, 10).map(x => <div className="leader-row" key={x.rank}><span className="rank">{x.rank}</span><span>{x.name}</span><b>{x.points.toLocaleString()} pts</b></div>) : <p className="leader-empty">Leaderboard appears when players join.</p>}
+      </section>
+      <section className="leader-card transaction-card">
+        <div className="leader-heading"><div><span className="eyebrow">YOUR ACCOUNT</span><h2>Recent transactions</h2></div><span className="tag">LAST 30</span></div>
+        {transactions.length ? transactions.map(item => {
+          const label = item.type === "tap_spend" ? "Live Points consumed" : item.type === "daily_reward" ? "Daily reward" : item.type === "ad_reward" ? "Advertisement reward" : item.type === "referral_bonus" ? "Referral Gome Coins" : item.type;
+          const coinAmount = Number(item.metadata?.gomeCoinsEarned ?? (item.type === "referral_bonus" ? item.points : 0));
+          return <div className="leader-row transaction-row" key={item.id}>
+            <span className="rank">{item.type === "tap_spend" ? "−" : "+"}</span>
+            <span>{label}<small>{new Date(item.createdAt).toLocaleString()}</small></span>
+            <b>{item.type === "referral_bonus" ? coinAmount + " GOME" : item.type === "tap_spend" ? item.points + " PTS" : item.points + " PTS"}</b>
+          </div>;
+        }) : <p className="leader-empty">Your reward and conversion transactions will appear here.</p>}
       </section>
       <footer><span>© {new Date().getFullYear()} Gome</span><span>PLAY FAIR. HAVE FUN.</span></footer>
     </main>
