@@ -55,7 +55,7 @@ export async function POST(req: Request) {
         adPointsEarned: adPoints,
         tapLevel: level.level,
         upgradeProgress: level.progress,
-        dailyClaimed: dailyClaim.rowCount > 0,
+        dailyClaimed: dailyClaim.rows.length > 0,
         referralCode: "ref_" + account.telegram_id,
       });
     } catch (error) {
