@@ -267,9 +267,14 @@ export default function TelegramApp() {
           const webApp = window.Telegram?.WebApp;
           const data = webApp?.initData || initData;
           if (data) {
-            if (data !== initData) setInitData(data);
             setMessage("Signing in securely with your Telegram account...");
-            void refresh();
+            if (data !== initData) {
+              // Let the initData effect run with the newly received Telegram session.
+              // Calling refresh immediately here would still use the previous state value.
+              setInitData(data);
+            } else {
+              void refresh();
+            }
             return;
           }
           setMessage("Opening the official Gome bot so Telegram can identify your account...");
