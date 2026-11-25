@@ -19,20 +19,22 @@ declare global {
 
 type Player = {
   user: { id: string; name: string; username?: string };
-  points: number;
-  lifetimeEarned: number;
-  adPointsEarned: number;
-  tapLevel: number;
-  upgradeProgress: number;
-  dailyClaimed: boolean;
-  referralCode: string;
+  /** Gome coin in hundredths (100 energy = 1 Gome). */
+  gomeCents: number;
   energy: number;
   maxEnergy: number;
-  energyRegenPerSecond: number;
+  tapPower: number;
+  level: number;
+  adsWatched: number;
+  nextLevelAds: number | null;
+  levelProgress: number;
+  dailyClaimed: boolean;
+  friendsInvited: number;
+  referralCode: string;
 };
-type Leader = { rank: number; name: string; points: number };
-type Float = { id: number; x: number; y: number; value: number };
-type Batch = { taps: number; batchId: string };
+type Leader = { rank: number; name: string; gomeCents: number };
+type Float = { id: number; x: number; y: number; label: string };
+type Batch = { taps: number; used: number; batchId: string };
 
 class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -40,6 +42,7 @@ class ApiError extends Error {
 
 const FLUSH_INTERVAL_MS = 1000;
 const MAX_BATCH = 300;
+const formatGome = (cents: number) => (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function TelegramApp() {
   const [initData, setInitData] = useState("");
@@ -48,12 +51,13 @@ export default function TelegramApp() {
   const [busy, setBusy] = useState(false); // daily / ad actions only — never blocks tapping
   const [message, setMessage] = useState("Open this Mini App inside Telegram to play.");
   const [energy, setEnergy] = useState(0);
-  const [unsent, setUnsent] = useState(0); // taps shown on screen but not yet confirmed by the server
+  const [unsentCents, setUnsentCents] = useState(0); // Gome shown on screen but not yet confirmed by the server
   const [floats, setFloats] = useState<Float[]>([]);
 
   // Refs hold the live tap state so rapid taps never wait on React re-renders or the network.
   const energyRef = useRef(0);
-  const pendingRef = useRef(0);
+  const pendingTapsRef = useRef(0);
+  const pendingUsedRef = useRef(0);
   const inflightRef = useRef<Batch | null>(null);
   const sendingRef = useRef(false);
   const playerRef = useRef<Player | null>(null);
@@ -63,7 +67,8 @@ export default function TelegramApp() {
 
   useEffect(() => { playerRef.current = player; }, [player]);
 
-  const syncUnsent = () => setUnsent(pendingRef.current + (inflightRef.current?.taps ?? 0));
+  const unconfirmedUsed = () => pendingUsedRef.current + (inflightRef.current?.used ?? 0);
+  const syncUnsent = () => setUnsentCents(unconfirmedUsed());
   const setEnergyBoth = (v: number) => { energyRef.current = v; setEnergy(v); };
 
   const api = useCallback(async (path: string, method: "GET" | "POST" = "GET", body?: unknown, keepalive = false) => {
@@ -78,15 +83,23 @@ export default function TelegramApp() {
     return d;
   }, [initData]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (afterAd = false) => {
     if (!initData) return;
     try {
+      const before = playerRef.current;
       const p: Player = await api("/api/telegram/auth", "POST");
       setPlayer(p);
-      setEnergyBoth(Math.max(0, p.energy - pendingRef.current));
+      setEnergyBoth(Math.max(0, p.energy - unconfirmedUsed()));
       const l = await api("/api/leaderboard");
       setLeaders(l.leaderboard);
-      setMessage("Tap the Gome coin to collect points.");
+      if (before && p.level > before.level) {
+        setMessage("🎉 Level up! You're now Level " + p.level + ": " + p.tapPower + " energy per tap, " + p.maxEnergy.toLocaleString() + " max energy.");
+        window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success");
+      } else if (afterAd && before && p.adsWatched > before.adsWatched) {
+        setMessage("Energy refilled! Tap the coin to collect your Gome.");
+      } else if (!afterAd) {
+        setMessage(p.energy > 0 ? "Tap the Gome coin to turn your energy into Gome." : "Out of energy. Watch an ad to refill.");
+      }
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Unable to connect.");
     }
@@ -95,10 +108,12 @@ export default function TelegramApp() {
   /** Send queued taps as one batch. A failed network send is retried with the same batchId, so it can't be double-counted. */
   const flush = useCallback(async (keepalive = false) => {
     if (sendingRef.current || !playerRef.current) return;
-    if (!inflightRef.current && pendingRef.current > 0) {
-      const taps = Math.min(MAX_BATCH, pendingRef.current);
-      pendingRef.current -= taps;
-      inflightRef.current = { taps, batchId: crypto.randomUUID() };
+    if (!inflightRef.current && pendingTapsRef.current > 0) {
+      const taps = Math.min(MAX_BATCH, pendingTapsRef.current);
+      const share = taps === pendingTapsRef.current ? pendingUsedRef.current : Math.round(pendingUsedRef.current * (taps / pendingTapsRef.current));
+      pendingTapsRef.current -= taps;
+      pendingUsedRef.current -= share;
+      inflightRef.current = { taps, used: share, batchId: crypto.randomUUID() };
     }
     const batch = inflightRef.current;
     if (!batch) return;
@@ -106,9 +121,9 @@ export default function TelegramApp() {
     try {
       const d = await api("/api/game/tap", "POST", { taps: batch.taps, batchId: batch.batchId }, keepalive);
       inflightRef.current = null;
-      setPlayer(p => (p ? { ...p, points: d.points, tapLevel: d.tapPower ?? p.tapLevel, lifetimeEarned: p.lifetimeEarned + (d.awarded ?? 0) } : p));
-      setEnergyBoth(Math.max(0, Number(d.energy) - pendingRef.current));
-      if (!d.duplicate && d.accepted < batch.taps) setMessage("Some taps weren't counted. Slow down a little or wait for energy to refill.");
+      setPlayer(p => (p ? { ...p, gomeCents: d.gomeCents, maxEnergy: d.maxEnergy ?? p.maxEnergy, tapPower: d.tapPower ?? p.tapPower } : p));
+      setEnergyBoth(Math.max(0, Number(d.energy) - pendingUsedRef.current));
+      if (!d.duplicate && d.energyUsed < batch.used) setMessage("Some taps weren't counted. Slow down a little.");
     } catch (e) {
       if (e instanceof ApiError) {
         // The server rejected it (e.g. session expired) — drop the batch instead of retrying forever.
@@ -145,17 +160,6 @@ export default function TelegramApp() {
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", onHide); window.removeEventListener("pagehide", onPageHide); };
   }, [flush]);
 
-  // Energy refills locally between server confirmations.
-  useEffect(() => {
-    if (!player) return;
-    const t = setInterval(() => {
-      const p = playerRef.current;
-      if (!p) return;
-      if (energyRef.current < p.maxEnergy) setEnergyBoth(Math.min(p.maxEnergy, energyRef.current + p.energyRegenPerSecond));
-    }, 1000);
-    return () => clearInterval(t);
-  }, [player]);
-
   function registerTap(clientX?: number, clientY?: number) {
     const p = playerRef.current;
     if (!p) return;
@@ -163,13 +167,15 @@ export default function TelegramApp() {
       const now = Date.now();
       if (now - lastEmptyWarn.current > 1500) {
         lastEmptyWarn.current = now;
-        setMessage("Out of energy. It refills automatically, so come back in a bit.");
+        setMessage(p.dailyClaimed ? "Out of energy. Watch an ad to refill your energy." : "Out of energy. Claim your daily full energy, then watch ads to refill.");
         window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("warning");
       }
       return;
     }
-    setEnergyBoth(energyRef.current - 1);
-    pendingRef.current += 1;
+    const used = Math.min(p.tapPower, energyRef.current);
+    setEnergyBoth(energyRef.current - used);
+    pendingTapsRef.current += 1;
+    pendingUsedRef.current += used;
     syncUnsent();
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
 
@@ -177,10 +183,10 @@ export default function TelegramApp() {
     const x = rect && clientX !== undefined ? clientX - rect.left : (rect?.width ?? 180) / 2;
     const y = rect && clientY !== undefined ? clientY - rect.top : (rect?.height ?? 180) / 2;
     const id = ++floatId.current;
-    setFloats(f => [...f.slice(-24), { id, x, y, value: p.tapLevel }]);
+    setFloats(f => [...f.slice(-24), { id, x, y, label: "+" + (used / 100).toFixed(2) }]);
     setTimeout(() => setFloats(f => f.filter(item => item.id !== id)), 900);
 
-    if (pendingRef.current >= MAX_BATCH) void flush();
+    if (pendingTapsRef.current >= MAX_BATCH) void flush();
   }
 
   function onCoinPointerDown(e: PointerEvent<HTMLButtonElement>) {
@@ -197,14 +203,15 @@ export default function TelegramApp() {
     if (!showAd) { setMessage("Ad service is still loading. Please try again."); return; }
     setBusy(true);
     try {
+      await flush(); // save taps first so the refill isn't overwritten on screen
       const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
-      const result = await showAd({ ymid, requestVar: "daily_reward_ad" });
+      const result = await showAd({ ymid, requestVar: "energy_refill_ad" });
       if (result?.reward_event_type === "valued") {
-        setMessage("Ad confirmed. Your 50 points will appear in a few seconds.");
-        setTimeout(() => void refresh(), 5000);
-        setTimeout(() => void refresh(), 15000);
+        setMessage("Ad confirmed. Your energy will refill in a few seconds.");
+        setTimeout(() => void refresh(true), 4000);
+        setTimeout(() => void refresh(true), 12000);
       } else {
-        setMessage("Ad completed, but it wasn't marked as a rewarded view. No points awarded.");
+        setMessage("Ad completed, but it wasn't marked as a rewarded view. No refill this time.");
       }
     } catch {
       setMessage("The ad could not be verified. Please try again.");
@@ -217,9 +224,11 @@ export default function TelegramApp() {
     if (!player || busy) return;
     setBusy(true);
     try {
+      await flush();
       const d = await api("/api/game/daily", "POST");
-      setPlayer(p => (p ? { ...p, points: d.points, lifetimeEarned: p.lifetimeEarned + d.awarded, dailyClaimed: true } : p));
-      setMessage("Daily reward claimed: +" + d.awarded + " points. Rewarded ads are now unlocked.");
+      setPlayer(p => (p ? { ...p, dailyClaimed: true, maxEnergy: d.maxEnergy } : p));
+      setEnergyBoth(Math.max(0, d.energy - unconfirmedUsed()));
+      setMessage("Daily energy claimed: full " + Number(d.energy).toLocaleString() + " energy. Ads are now unlocked.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Claim failed.");
     } finally {
@@ -235,18 +244,18 @@ export default function TelegramApp() {
       return;
     }
     const link = "https://t.me/" + bot + "?startapp=" + player.referralCode;
-    const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Join me on Gome and play to earn points!");
+    const shareUrl = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("Join me on Gome Coin: watch, tap and earn Gome!");
     const webApp = window.Telegram?.WebApp;
     if (webApp?.openTelegramLink) webApp.openTelegramLink(shareUrl);
-    else if (navigator.share) void navigator.share({ title: "Join Gome", text: "Play Gome with me!", url: link }).catch(() => undefined);
+    else if (navigator.share) void navigator.share({ title: "Join Gome Coin", text: "Watch, tap and earn Gome!", url: link }).catch(() => undefined);
     else void navigator.clipboard.writeText(link).then(() => setMessage("Referral link copied."));
   }
 
-  const nextLevel = player ? Math.min(10, player.tapLevel + 1) : 2;
-  const shownPoints = player ? player.points + unsent * player.tapLevel : null;
+  const shownCents = player ? player.gomeCents + unsentCents : null;
   const maxEnergy = player?.maxEnergy ?? 1000;
-  const energyPct = player ? Math.round((energy / maxEnergy) * 100) : 0;
+  const energyPct = player ? Math.min(100, Math.round((energy / maxEnergy) * 100)) : 0;
   const empty = !!player && energy < 1;
+  const atMax = !!player && player.nextLevelAds === null;
 
   return (
     <main className="game-shell">
@@ -256,11 +265,11 @@ export default function TelegramApp() {
       </header>
 
       <section className="game-hero">
-        <div className="eyebrow"><span className="pulse" /> TAP • PLAY • GROW</div>
+        <div className="eyebrow"><span className="pulse" /> WATCH • TAP • EARN</div>
         <div className="balance-card">
-          <span>YOUR POINTS</span>
-          <strong>{shownPoints !== null ? shownPoints.toLocaleString() : "—"}</strong>
-          <small>Game points · no cash value</small>
+          <span>YOUR GOME COIN</span>
+          <strong>{shownCents !== null ? formatGome(shownCents) : "—"}</strong>
+          <small>100 energy = 1 Gome</small>
         </div>
 
         <div className="coin-wrap">
@@ -271,37 +280,41 @@ export default function TelegramApp() {
             onKeyDown={onCoinKey}
             onContextMenu={(e: { preventDefault: () => void }) => e.preventDefault()}
             disabled={!player}
-            aria-label="Tap Gome coin to earn points"
+            aria-label="Tap Gome coin to turn energy into Gome"
           >
             <span>G</span><small>GOME</small>
-            {floats.map(f => <i key={f.id} className="tap-float" style={{ left: f.x, top: f.y }}>+{f.value}</i>)}
+            {floats.map(f => <i key={f.id} className="tap-float" style={{ left: f.x, top: f.y }}>{f.label}</i>)}
           </button>
         </div>
-        <div className="tap-power">{player ? player.tapLevel : 1} <span>POINT{player?.tapLevel === 1 ? "" : "S"} PER TAP</span></div>
+        <div className="tap-power">{player ? player.tapPower : 1} <span>ENERGY PER TAP · +{((player?.tapPower ?? 1) / 100).toFixed(2)} GOME</span></div>
 
         <div className="energy-card" aria-label={"Energy " + energy + " of " + maxEnergy}>
           <div className="energy-heading"><span>⚡ ENERGY</span><b>{player ? energy.toLocaleString() : "—"} <small>/ {maxEnergy.toLocaleString()}</small></b></div>
           <div className="energy-track"><div className="energy-fill" style={{ width: energyPct + "%" }} /></div>
-          <div className="energy-footer">{player ? (energy >= maxEnergy ? "FULL" : "+" + player.energyRegenPerSecond + " / SEC") : ""}</div>
+          <div className="energy-footer">{player ? (energy >= maxEnergy ? "FULL" : "WATCH AN AD TO REFILL") : ""}</div>
         </div>
 
         <div className="upgrade-card">
-          <div className="upgrade-heading"><span>LEVEL {player?.tapLevel ?? 1}</span><b>{player?.upgradeProgress ?? 0}%</b></div>
-          <div className="progress-track"><div className="progress-fill" style={{ width: (player?.upgradeProgress ?? 0) + "%" }} /></div>
-          <div className="upgrade-footer"><span>UPGRADE PROGRESS</span><strong>{player?.tapLevel === 10 ? "MAX LEVEL" : "NEXT: LEVEL " + nextLevel}</strong></div>
+          <div className="upgrade-heading"><span>LEVEL {player?.level ?? 1}</span><b>{atMax ? "MAX" : (player?.levelProgress ?? 0) + "%"}</b></div>
+          <div className="progress-track"><div className="progress-fill" style={{ width: (player?.levelProgress ?? 0) + "%" }} /></div>
+          <div className="upgrade-footer">
+            <span>{player ? player.adsWatched.toLocaleString() + (atMax ? " ADS WATCHED" : " / " + (player.nextLevelAds ?? 0).toLocaleString() + " ADS") : "ADS WATCHED"}</span>
+            <strong>{atMax ? "MAX LEVEL" : "NEXT: LEVEL " + ((player?.level ?? 1) + 1)}</strong>
+          </div>
         </div>
 
         <p className="game-message" role="status">{message}</p>
         <div className="game-actions">
-          <button className="ad-button" onClick={watchAd} disabled={!player?.dailyClaimed || busy} title={!player?.dailyClaimed ? "Claim your daily points first" : "Watch a Monetag rewarded interstitial"}>▶ Watch ad · +50 <small>{!player?.dailyClaimed ? "CLAIM DAILY FIRST" : "REWARDED AD"}</small></button>
-          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Claim daily points"}</button>
-          <button onClick={invite} disabled={!player}>↗ Share & invite</button>
+          <button className="ad-button" onClick={watchAd} disabled={!player?.dailyClaimed || busy} title={!player?.dailyClaimed ? "Claim your daily energy first" : "Watch a rewarded ad to refill your energy"}>▶ Watch ad · Refill energy <small>{!player?.dailyClaimed ? "CLAIM DAILY ENERGY FIRST" : "COUNTS TOWARD NEXT LEVEL"}</small></button>
+          <button onClick={daily} disabled={!player || busy || player.dailyClaimed}>🎁 {player?.dailyClaimed ? "Daily claimed" : "Daily full energy"}</button>
+          <button onClick={invite} disabled={!player}>↗ Invite · +10 Gome</button>
         </div>
+        {player && player.friendsInvited > 0 ? <p className="invite-note">{player.friendsInvited} friend{player.friendsInvited === 1 ? "" : "s"} invited</p> : null}
       </section>
 
       <section className="leader-card">
         <div className="leader-heading"><div><span className="eyebrow">COMMUNITY</span><h2>Leaderboard</h2></div><span className="tag">TOP 20</span></div>
-        {leaders.length ? leaders.slice(0, 10).map(x => <div className="leader-row" key={x.rank}><span className="rank">{x.rank}</span><span>{x.name}</span><b>{x.points.toLocaleString()} pts</b></div>) : <p className="leader-empty">Leaderboard appears when players join.</p>}
+        {leaders.length ? leaders.slice(0, 10).map(x => <div className="leader-row" key={x.rank}><span className="rank">{x.rank}</span><span>{x.name}</span><b>{formatGome(x.gomeCents)} GOME</b></div>) : <p className="leader-empty">Leaderboard appears when players join.</p>}
       </section>
       <footer><span>© {new Date().getFullYear()} Gome</span><span>PLAY FAIR. HAVE FUN.</span></footer>
     </main>

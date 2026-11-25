@@ -1,6 +1,7 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { creditAdView } from "@/lib/ads";
 
 export const runtime = "nodejs";
 
@@ -61,26 +62,20 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, awarded: 0, reason: "daily_claim_required" });
     }
 
-    const inserted = await client.query(
-      "INSERT INTO rewarded_ad_events(provider_event_id, user_id, points_awarded) VALUES($1, $2, 50) ON CONFLICT(provider_event_id) DO NOTHING RETURNING provider_event_id",
-      [ymid, userId]
-    );
-    if (!inserted.rowCount) {
+    // A confirmed ad refills energy to the max for the player's level and counts toward the next level.
+    // The estimated price Monetag reports is stored per ad, so total ad revenue can be reported later.
+    const rawPrice = Number(params.get("estimated_price"));
+    const result = await creditAdView(client, userId, ymid, {
+      estimatedPrice: Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : null,
+      metadata: { provider: "monetag", zoneId, eventType, rewardType },
+    });
+    if (result.duplicate) {
       await client.query("ROLLBACK");
-      return NextResponse.json({ ok: true, duplicate: true, awarded: 0 });
+      return NextResponse.json({ ok: true, duplicate: true });
     }
 
-    await client.query(
-      "UPDATE rewards_wallets SET points = points + 50, lifetime_earned = lifetime_earned + 50, ad_points_earned = ad_points_earned + 50, updated_at = NOW() WHERE user_id = $1",
-      [userId]
-    );
-    await client.query(
-      "INSERT INTO rewards_transactions(user_id, type, points, idempotency_key, metadata) VALUES($1, 'ad_reward', 50, $2, $3)",
-      [userId, randomUUID(), JSON.stringify({ provider: "monetag", ymid, zoneId, estimatedPrice: params.get("estimated_price") })]
-    );
-
     await client.query("COMMIT");
-    return NextResponse.json({ ok: true, awarded: 50 });
+    return NextResponse.json({ ok: true, energy: result.energy, level: result.level, adsWatched: result.adsWatched });
   } catch {
     await client.query("ROLLBACK");
     return NextResponse.json({ error: "Unable to process reward." }, { status: 500 });
