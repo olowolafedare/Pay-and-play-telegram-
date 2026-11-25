@@ -1,22 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getInitData, verifyTelegramInitData } from "@/lib/telegram";
+import { currentEnergy, gameConfig, progression } from "@/lib/game";
 
 export const runtime = "nodejs";
-
-const LEVEL_THRESHOLDS = [0, 12_500, 30_000, 55_000, 90_000, 135_000, 195_000, 270_000, 365_000, 500_000];
-
-function progression(adPoints: number) {
-  let level = 1;
-  for (let i = 1; i < LEVEL_THRESHOLDS.length; i++) {
-    if (adPoints >= LEVEL_THRESHOLDS[i]) level = i + 1;
-    else break;
-  }
-  if (level >= 10) return { level: 10, progress: 100 };
-  const start = LEVEL_THRESHOLDS[level - 1];
-  const end = LEVEL_THRESHOLDS[level];
-  return { level, progress: Math.max(0, Math.min(99, Math.floor(((adPoints - start) / (end - start)) * 100))) };
-}
 
 export async function POST(req: Request) {
   try {
@@ -36,17 +23,20 @@ export async function POST(req: Request) {
          ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name, language_code = EXCLUDED.language_code, last_seen_at = NOW()
          RETURNING id, telegram_id, username, first_name`,
-        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, referrerDbId]
+        // referred_by references app_users(telegram_id), so store the referrer's Telegram ID, not the internal row id.
+        [user.id, user.username ?? null, user.first_name, user.last_name ?? null, user.language_code ?? null, referrerDbId ? rawReferrerId : null]
       );
       const account = saved.rows[0];
       await client.query("INSERT INTO rewards_wallets (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", [account.id]);
       if (referrerDbId) {
         await client.query(`INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES ($1, $2) ON CONFLICT (referred_user_id) DO NOTHING`, [referrerDbId, account.id]);
       }
-      const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned FROM rewards_wallets WHERE user_id = $1", [account.id]);
+      const wallet = await client.query("SELECT points, lifetime_earned, ad_points_earned, energy, EXTRACT(EPOCH FROM (NOW() - energy_updated_at))::float8 AS energy_elapsed FROM rewards_wallets WHERE user_id = $1", [account.id]);
       const dailyClaim = await client.query("SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE", [account.id]);
       const adPoints = Number(wallet.rows[0].ad_points_earned);
       const level = progression(adPoints);
+      const cfg = gameConfig();
+      const energy = currentEnergy(Number(wallet.rows[0].energy), Number(wallet.rows[0].energy_elapsed), cfg);
       await client.query("COMMIT");
       return NextResponse.json({
         user: { id: String(account.telegram_id), name: account.first_name, username: account.username },
@@ -55,6 +45,9 @@ export async function POST(req: Request) {
         adPointsEarned: adPoints,
         tapLevel: level.level,
         upgradeProgress: level.progress,
+        energy: energy.energy,
+        maxEnergy: cfg.maxEnergy,
+        energyRegenPerSecond: cfg.regenPerSecond,
         dailyClaimed: dailyClaim.rows.length > 0,
         referralCode: "ref_" + account.telegram_id,
       });

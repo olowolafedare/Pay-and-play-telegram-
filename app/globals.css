@@ -37,3 +37,20 @@
 .leader-heading h2{font-size:19px}
 .game-shell footer{font-size:9px}
 @media(max-width:390px){.game-shell{padding:14px 12px}.tap-coin{width:164px;height:164px}.tap-coin span{font-size:68px}.game-actions button{font-size:11px}}
+
+/* Instant tapping + energy bar */
+.coin-wrap{position:relative;display:flex;justify-content:center}
+.tap-coin{position:relative;overflow:visible;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;outline:none}
+.tap-coin:focus-visible{box-shadow:0 0 0 3px #7ee5ce,0 0 55px #e7b34a50,inset 0 0 0 5px #bd842f}
+.tap-coin:not(:disabled):active{transform:scale(.94)}
+.tap-coin.is-empty{filter:grayscale(.7) brightness(.75)}
+.tap-float{position:absolute;transform:translate(-50%,-50%);pointer-events:none;font-style:normal;font-size:26px;font-weight:900;color:#fff;text-shadow:0 2px 6px #000a,0 0 12px #ffe19a;animation:tap-float .9s ease-out forwards;z-index:2}
+@keyframes tap-float{0%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-160%) scale(1.15)}}
+.energy-card{width:min(100%,360px);margin:0 auto 12px;padding:12px 16px;border:1px solid #35446d;border-radius:16px;background:#111a2d}
+.energy-heading{display:flex;align-items:center;justify-content:space-between;font-size:11px;letter-spacing:1.2px;color:#b9c5e0}
+.energy-heading b{font-size:18px;letter-spacing:0;color:#ffe19a}
+.energy-heading small{font-size:11px;color:#8795b5;font-weight:600}
+.energy-track{height:11px;margin:9px 0 7px;border-radius:30px;background:#263451;overflow:hidden}
+.energy-fill{height:100%;border-radius:30px;background:linear-gradient(90deg,#f5b84a,#ffe19a);box-shadow:0 0 12px #ffd36e66;transition:width .25s ease}
+.energy-footer{text-align:right;font-size:9px;letter-spacing:1px;color:#8795b5;min-height:11px}
+@media (prefers-reduced-motion:reduce){.tap-float{animation-duration:.4s}.tap-coin,.energy-fill,.progress-fill{transition:none}}

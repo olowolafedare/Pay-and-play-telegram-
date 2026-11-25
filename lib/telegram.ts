@@ -7,7 +7,7 @@ export function verifyTelegramInitData(initData:string): {user:TelegramUser; sta
  const params=new URLSearchParams(initData), hash=params.get("hash");
  if(!hash || !/^[a-f0-9]{64}$/i.test(hash)) throw new Error("Invalid Telegram signature");
  params.delete("hash");
- const check=[...params.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>k+"="+v).join("\n");
+ const check=[...params.entries()].sort(([a],[b])=>(a<b?-1:a>b?1:0)).map(([k,v])=>k+"="+v).join("\n");
  const secret=createHmac("sha256","WebAppData").update(token).digest();
  const expected=createHmac("sha256",secret).update(check).digest(), supplied=Buffer.from(hash,"hex");
  if(supplied.length!==expected.length || !timingSafeEqual(supplied,expected)) throw new Error("Invalid Telegram signature");
