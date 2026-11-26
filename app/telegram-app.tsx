@@ -197,24 +197,48 @@ export default function TelegramApp() {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); registerTap(); }
   }
 
+  /** After an ad closes, poll the server (the source of truth) until Monetag's confirmation lands. */
+  async function waitForAdCredit(adsBefore: number) {
+    for (const delay of [3000, 5000, 8000, 12000, 15000]) {
+      await new Promise(r => setTimeout(r, delay));
+      try {
+        const p: Player = await api("/api/telegram/auth", "POST");
+        if (p.adsWatched > adsBefore) {
+          const leveledUp = playerRef.current ? p.level > playerRef.current.level : false;
+          setPlayer(p);
+          setEnergyBoth(Math.max(0, p.energy - unconfirmedUsed()));
+          setMessage(leveledUp
+            ? "🎉 Level up! You're now Level " + p.level + ": " + p.tapPower + " energy per tap, " + p.maxEnergy.toLocaleString() + " max energy."
+            : "⚡ Energy refilled! Tap the coin to collect your Gome.");
+          window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success");
+          return;
+        }
+      } catch { /* network hiccup: keep waiting */ }
+    }
+    setMessage("No reward was confirmed for that ad. Only fully watched, paid ads refill energy. Please try another.");
+  }
+
   async function watchAd() {
     if (!player || !player.dailyClaimed || busy) return;
     const showAd = window.show_12342383;
-    if (!showAd) { setMessage("Ad service is still loading. Please try again."); return; }
+    if (!showAd) { setMessage("Ad service is still loading. Please try again in a moment."); return; }
     setBusy(true);
+    setMessage("Loading ad...");
+    const adsBefore = player.adsWatched;
     try {
       await flush(); // save taps first so the refill isn't overwritten on screen
       const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
       const result = await showAd({ ymid, requestVar: "energy_refill_ad" });
-      if (result?.reward_event_type === "valued") {
-        setMessage("Ad confirmed. Your energy will refill in a few seconds.");
-        setTimeout(() => void refresh(true), 4000);
-        setTimeout(() => void refresh(true), 12000);
+      if (result?.reward_event_type === "non_valued") {
+        setMessage("That ad wasn't a paid view, so there's no refill this time. Please try another.");
       } else {
-        setMessage("Ad completed, but it wasn't marked as a rewarded view. No refill this time.");
+        setMessage("Checking your reward...");
+        await waitForAdCredit(adsBefore);
       }
     } catch {
-      setMessage("The ad could not be verified. Please try again.");
+      // The ad may have been closed early or failed to load; the server still decides, so check once more.
+      setMessage("Checking your reward...");
+      await waitForAdCredit(adsBefore);
     } finally {
       setBusy(false);
     }
