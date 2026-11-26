@@ -25,8 +25,10 @@ type Player = {
   maxEnergy: number;
   tapPower: number;
   level: number;
-  adsWatched: number;
-  nextLevelAds: number | null;
+  /** True at Level 10. The ad count itself is admin-only and not sent to the app. */
+  atMaxLevel: boolean;
+  /** When the last ad refill was credited (used only to detect a new refill). */
+  lastAdAt: string | null;
   levelProgress: number;
   dailyClaimed: boolean;
   friendsInvited: number;
@@ -95,7 +97,7 @@ export default function TelegramApp() {
       if (before && p.level > before.level) {
         setMessage("🎉 Level up! You're now Level " + p.level + ": " + p.tapPower + " energy per tap, " + p.maxEnergy.toLocaleString() + " max energy.");
         window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred?.("success");
-      } else if (afterAd && before && p.adsWatched > before.adsWatched) {
+      } else if (afterAd && before && p.lastAdAt !== before.lastAdAt) {
         setMessage("Energy refilled! Tap the coin to collect your Gome.");
       } else if (!afterAd) {
         setMessage(p.energy > 0 ? "Tap the Gome coin to turn your energy into Gome." : "Out of energy. Watch an ad to refill.");
@@ -198,12 +200,12 @@ export default function TelegramApp() {
   }
 
   /** After an ad closes, poll the server (the source of truth) until Monetag's confirmation lands. */
-  async function waitForAdCredit(adsBefore: number) {
+  async function waitForAdCredit(lastAdBefore: string | null) {
     for (const delay of [3000, 5000, 8000, 12000, 15000]) {
       await new Promise(r => setTimeout(r, delay));
       try {
         const p: Player = await api("/api/telegram/auth", "POST");
-        if (p.adsWatched > adsBefore) {
+        if (p.lastAdAt !== null && p.lastAdAt !== lastAdBefore) {
           const leveledUp = playerRef.current ? p.level > playerRef.current.level : false;
           setPlayer(p);
           setEnergyBoth(Math.max(0, p.energy - unconfirmedUsed()));
@@ -224,7 +226,7 @@ export default function TelegramApp() {
     if (!showAd) { setMessage("Ad service is still loading. Please try again in a moment."); return; }
     setBusy(true);
     setMessage("Loading ad...");
-    const adsBefore = player.adsWatched;
+    const lastAdBefore = player.lastAdAt;
     try {
       await flush(); // save taps first so the refill isn't overwritten on screen
       const ymid = "gome_" + player.user.id + "_" + crypto.randomUUID().replace(/-/g, "");
@@ -233,12 +235,12 @@ export default function TelegramApp() {
         setMessage("That ad wasn't a paid view, so there's no refill this time. Please try another.");
       } else {
         setMessage("Checking your reward...");
-        await waitForAdCredit(adsBefore);
+        await waitForAdCredit(lastAdBefore);
       }
     } catch {
       // The ad may have been closed early or failed to load; the server still decides, so check once more.
       setMessage("Checking your reward...");
-      await waitForAdCredit(adsBefore);
+      await waitForAdCredit(lastAdBefore);
     } finally {
       setBusy(false);
     }
@@ -279,7 +281,7 @@ export default function TelegramApp() {
   const maxEnergy = player?.maxEnergy ?? 1000;
   const energyPct = player ? Math.min(100, Math.round((energy / maxEnergy) * 100)) : 0;
   const empty = !!player && energy < 1;
-  const atMax = !!player && player.nextLevelAds === null;
+  const atMax = !!player && player.atMaxLevel;
 
   return (
     <main className="game-shell">
@@ -322,7 +324,7 @@ export default function TelegramApp() {
           <div className="upgrade-heading"><span>LEVEL {player?.level ?? 1}</span><b>{atMax ? "MAX" : (player?.levelProgress ?? 0) + "%"}</b></div>
           <div className="progress-track"><div className="progress-fill" style={{ width: (player?.levelProgress ?? 0) + "%" }} /></div>
           <div className="upgrade-footer">
-            <span>{player ? player.adsWatched.toLocaleString() + (atMax ? " ADS WATCHED" : " / " + (player.nextLevelAds ?? 0).toLocaleString() + " ADS") : "ADS WATCHED"}</span>
+            <span>UPGRADE PROGRESS</span>
             <strong>{atMax ? "MAX LEVEL" : "NEXT: LEVEL " + ((player?.level ?? 1) + 1)}</strong>
           </div>
         </div>

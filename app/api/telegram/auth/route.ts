@@ -53,6 +53,8 @@ export async function POST(req: Request) {
       const wallet = await client.query("SELECT points, ads_watched, energy FROM rewards_wallets WHERE user_id = $1", [account.id]);
       const dailyClaim = await client.query("SELECT 1 FROM daily_reward_claims WHERE user_id = $1 AND claim_date = CURRENT_DATE", [account.id]);
       const invited = await client.query("SELECT COUNT(*)::int AS n FROM referrals WHERE referrer_user_id = $1", [account.id]);
+      // Time of the last credited ad: lets the app notice a new refill without revealing how many ads were watched.
+      const lastAd = await client.query("SELECT MAX(created_at)::text AS at FROM rewarded_ad_events WHERE user_id = $1", [account.id]);
       await client.query("COMMIT");
 
       const info = levelInfo(Number(wallet.rows[0].ads_watched));
@@ -63,8 +65,9 @@ export async function POST(req: Request) {
         maxEnergy: info.maxEnergy,
         tapPower: info.tapPower,
         level: info.level,
-        adsWatched: info.adsWatched,
-        nextLevelAds: info.nextLevelAds,
+        // The ad count and level thresholds are admin-only and never sent to the phone.
+        atMaxLevel: info.nextLevelAds === null,
+        lastAdAt: lastAd.rows[0]?.at ?? null,
         levelProgress: info.levelProgress,
         dailyClaimed: dailyClaim.rows.length > 0,
         friendsInvited: Number(invited.rows[0].n),
